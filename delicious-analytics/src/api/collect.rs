@@ -11,11 +11,7 @@ pub struct Session {
     language: String,
 }
 
-
-
-pub async fn post(body: Json<Session>) {
-
-}
+pub async fn post(body: Json<Session>) {}
 
 pub struct UmamiCache(delicious_jose::Compact);
 
@@ -25,11 +21,12 @@ impl Header for UmamiCache {
         &NAME
     }
 
-    fn decode<'i, I: Iterator<Item = &'i HeaderValue>>(values: &mut I) -> Result<Self, headers_core::Error> {
+    fn decode<'i, I: Iterator<Item = &'i HeaderValue>>(
+        values: &mut I,
+    ) -> Result<Self, headers_core::Error> {
         values
             .next()
             .and_then(|v| v.to_str().ok())
-            .map(String::from)
             .map(delicious_jose::Compact::decode)
             .map(UmamiCache)
             .ok_or_else(headers_core::Error::invalid)
@@ -38,8 +35,6 @@ impl Header for UmamiCache {
     fn encode<E: Extend<HeaderValue>>(&self, values: &mut E) {
         let value = self
             .0
-            .clone()
-            .into_inner()
             .as_str()
             .parse()
             .expect("Mime is always a valid HeaderValue");

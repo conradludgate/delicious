@@ -79,9 +79,7 @@ use std::borrow::Borrow;
 use std::fmt::{self, Debug, Display};
 use std::iter;
 use std::ops::Deref;
-use std::str::{self, FromStr};
 
-// use data_encoding::BASE64URL_NOPAD;
 use serde::de::{self, DeserializeOwned};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use smallvec::SmallVec;
@@ -391,72 +389,6 @@ pub struct Empty {}
 //     }
 // }
 
-/// A newtype wrapper around a string to indicate it's base64 URL encoded
-#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
-pub struct Base64Url(String);
-
-impl Base64Url {
-    /// Unwrap the embedded string, consuming self in the process
-    pub fn unwrap(self) -> String {
-        let Base64Url(string) = self;
-        string
-    }
-
-    /// "Borrow" the string
-    pub fn str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Deref for Base64Url {
-    type Target = str;
-
-    fn deref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl FromStr for Base64Url {
-    type Err = Error;
-
-    /// This never fails
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Base64Url(s.to_string()))
-    }
-}
-
-impl Borrow<str> for Base64Url {
-    fn borrow(&self) -> &str {
-        self.str()
-    }
-}
-
-// impl CompactPart for Base64Url {
-//     fn to_bytes(&self) -> Result<Vec<u8>, Error> {
-//         Ok(BASE64URL_NOPAD.decode(self.as_ref())?)
-//     }
-
-//     /// Convert a sequence of bytes into Self
-//     fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-//         let string = str::from_utf8(bytes)?;
-//         Ok(Base64Url(string.to_string()))
-//     }
-
-//     fn to_base64(&self) -> Result<Base64Url, Error> {
-//         Ok((*self).clone())
-//     }
-
-//     fn from_base64<B: AsRef<[u8]>>(encoded: &B) -> Result<Self, Error> {
-//         Self::from_bytes(encoded.as_ref())
-//     }
-// }
-
-impl AsRef<[u8]> for Base64Url {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
 /// A collection of `CompactPart`s that have been converted to `Base64Url`
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Compact {
@@ -505,9 +437,17 @@ impl Compact {
         self.source
     }
 
+    /// Encodes the various parts into Base64 URL encoding and then concatenates them with period '.'
+    /// This corresponds to the various `Compact` representation in JWE and JWS, for example
+    pub fn as_str(&self) -> &str {
+        let end = self.source.len().saturating_sub(1);
+        &self.source[..end]
+    }
+
     /// Convenience function to split an encoded compact representation into a list of `Base64Url`.
-    pub fn decode(mut source: String) -> Self {
+    pub fn decode(source: &str) -> Self {
         let mut indices = SmallVec::new();
+        let mut source = source.to_owned();
 
         if !source.is_empty() {
             source.push('.');
@@ -554,8 +494,7 @@ impl Default for Compact {
 
 impl Display for Compact {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let end = self.source.len().saturating_sub(1);
-        write!(f, "{}", &self.source[..end])
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -564,8 +503,7 @@ impl Serialize for Compact {
     where
         S: Serializer,
     {
-        let end = self.source.len().saturating_sub(1);
-        serializer.serialize_str(&self.source[..end])
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -587,7 +525,7 @@ impl<'de> Deserialize<'de> for Compact {
             where
                 E: de::Error,
             {
-                Ok(Compact::decode(value.to_owned()))
+                Ok(Compact::decode(value))
             }
         }
 

@@ -333,7 +333,7 @@ where
 
     // /// Create a new encrypted JWE
     // pub fn new_encrypted(token: &str) -> Self {
-    //     Compact::Encrypted(crate::Compact::decode(token.to_owned()))
+    //     Compact::Encrypted(crate::Compact::decode(&token.to_owned()))
     // }
 
     // /// Consumes self and encrypt it. If the token is already encrypted, this is a no-op.
@@ -717,7 +717,7 @@ mod tests {
         let key_json = r#"{"k":"-wcjSeVOJ0V43ij5uDBeFlOR1w2T40jqIfICQb8-sUw","kty":"oct"}"#;
 
         let key: jwk::JWK<Empty> = not_err!(serde_json::from_str(key_json));
-        let token: Compact = Compact::decode(external_token.to_owned());
+        let token: Compact = Compact::decode(external_token);
 
         let decrypted_jwe = not_err!(Decrypted::<String, Empty>::decrypt(
             &token,
@@ -1050,7 +1050,7 @@ mod tests {
     #[should_panic(expected = "PartsLengthError")]
     fn decrypt_with_incorrect_length() {
         let key = cek_oct_key(256 / 8);
-        let invalid = Compact::decode("INVALID".to_owned());
+        let invalid = Compact::decode("INVALID");
         let _ = Decrypted::<Empty, Empty>::decrypt(
             &invalid,
             &key,
@@ -1098,7 +1098,7 @@ mod tests {
             encrypted_jwe.part(4).unwrap()
         );
 
-        let encrypted_jwe = Compact::decode(s);
+        let encrypted_jwe = Compact::decode(&s);
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
@@ -1146,7 +1146,7 @@ mod tests {
             encrypted_jwe.part(4).unwrap()
         );
 
-        let encrypted_jwe = Compact::decode(s);
+        let encrypted_jwe = Compact::decode(&s);
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
@@ -1189,7 +1189,7 @@ mod tests {
             base64::encode_config(&[0], base64::URL_SAFE_NO_PAD),
         );
 
-        let encrypted_jwe = Compact::decode(s);
+        let encrypted_jwe = Compact::decode(&s);
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
@@ -1238,7 +1238,7 @@ mod tests {
             encrypted_jwe.part(4).unwrap()
         );
 
-        let encrypted_jwe = Compact::decode(s);
+        let encrypted_jwe = Compact::decode(&s);
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
@@ -1282,7 +1282,7 @@ mod tests {
             encrypted_jwe.part(4).unwrap()
         );
 
-        let encrypted_jwe = Compact::decode(s);
+        let encrypted_jwe = Compact::decode(&s);
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
@@ -1326,7 +1326,7 @@ mod tests {
             encrypted_jwe.part(4).unwrap()
         );
 
-        let encrypted_jwe = Compact::decode(s);
+        let encrypted_jwe = Compact::decode(&s);
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
@@ -1370,7 +1370,7 @@ mod tests {
             encrypted_jwe.part(4).unwrap()
         );
 
-        let encrypted_jwe = Compact::decode(s);
+        let encrypted_jwe = Compact::decode(&s);
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,

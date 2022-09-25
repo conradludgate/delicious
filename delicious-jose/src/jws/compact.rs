@@ -56,7 +56,7 @@ where
 
     // /// New encoded JWT
     // pub fn new_encoded(token: &str) -> Self {
-    //     Compact::Encoded(crate::Compact::decode(token.to_owned()))
+    //     Compact::Encoded(crate::Compact::decode(&token.to_owned()))
     // }
 
     // /// Consumes self and convert into encoded form. If the token is already encoded,
@@ -75,7 +75,7 @@ where
         let mut compact = crate::Compact::new();
         compact.push(&self.header)?;
         compact.push(&self.payload)?;
-        let encoded_payload = compact.clone().into_inner();
+        let encoded_payload = compact.as_str();
         let signature = &self
             .header
             .registered
@@ -114,8 +114,7 @@ where
         }
 
         let signature = encoded.part_decoded(2)?;
-        let payload = encoded.clone().into_inner();
-        let payload = payload.rsplit_once('.').unwrap().0;
+        let payload = encoded.as_str().rsplit_once('.').unwrap().0;
 
         algorithm
             .verify(signature.as_ref(), payload.as_ref(), secret)
@@ -152,8 +151,7 @@ where
         }
 
         let signature = encoded.part_decoded(2)?;
-        let payload = encoded.clone().into_inner();
-        let payload = payload.rsplit_once('.').unwrap().0;
+        let payload = encoded.as_str().rsplit_once('.').unwrap().0;
 
         let header: Header<H> = encoded.deser_part(0)?;
         let key_id = header
@@ -509,7 +507,7 @@ mod tests {
                    kqZMEA";
         let signing_secret = Secret::PublicKey(hex::decode(public_key.as_bytes()).unwrap());
 
-        let token = Compact::decode(jwt.to_owned());
+        let token = Compact::decode(jwt);
         let _ = not_err!(Decoded::<ClaimsSet<serde_json::Value>, Empty>::decode(
             &token,
             &signing_secret,
@@ -561,7 +559,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "PartsLengthError { expected: 3, actual: 1 }")]
     fn compact_jws_decode_token_missing_parts() {
-        let token = Compact::decode("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9".to_owned());
+        let token = Compact::decode("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9");
         let claims = Decoded::<PrivateClaims, Empty>::decode(
             &token,
             &Secret::Bytes("secret".to_string().into_bytes()),
@@ -576,8 +574,7 @@ mod tests {
         let token = Compact::decode(
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.\
              eyJzdWIiOiJiQGIuY29tIiwiY29tcGFueSI6IkFDTUUifQ.\
-             pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI"
-                .to_owned(),
+             pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI",
         );
         let claims = Decoded::<PrivateClaims, Empty>::decode(
             &token,
@@ -593,8 +590,7 @@ mod tests {
         let token = Compact::decode(
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.\
              eyJzdWIiOiJiQGIuY29tIiwiY29tcGFueSI6IkFDTUUifQ.\
-             pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI"
-                .to_owned(),
+             pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI",
         );
         let public_key = Secret::public_key_from_file("test/fixtures/rsa_public_key.der").unwrap();
         let claims =
@@ -608,8 +604,7 @@ mod tests {
         let token = Compact::decode(
             "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.\
              eyJzdWIiOiJiQGIuY29tIiwiY29tcGFueSI6IkFDTUUifQ.\
-             pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI"
-                .to_owned(),
+             pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI",
         );
         let claims = Decoded::<PrivateClaims, Empty>::decode(
             &token,
@@ -659,8 +654,7 @@ mod tests {
         let token = Compact::decode(
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
-                .to_owned(),
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
         );
 
         let jwks: JWKSet<Empty> = serde_json::from_str(
@@ -688,8 +682,7 @@ mod tests {
         let token = Compact::decode(
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
-                .to_owned(),
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
         );
 
         let jwks: JWKSet<Empty> = serde_json::from_str(
@@ -722,8 +715,7 @@ mod tests {
         let token = Compact::decode(
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
-                .to_owned(),
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
         );
 
         let jwks: JWKSet<Empty> = serde_json::from_str(
@@ -755,8 +747,7 @@ mod tests {
         let token = Compact::decode(
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
-                .to_owned(),
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
         );
 
         let jwks: JWKSet<Empty> = serde_json::from_str(
@@ -788,8 +779,7 @@ mod tests {
         let token = Compact::decode(
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
-                .to_owned(),
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
         );
 
         let jwks: JWKSet<Empty> = serde_json::from_str(
@@ -821,8 +811,7 @@ mod tests {
         let token = Compact::decode(
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
-                .to_owned(),
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
         );
 
         let jwks: JWKSet<Empty> = serde_json::from_str(
@@ -851,8 +840,7 @@ mod tests {
              Ui8PGBM13NcF5IxhybHRM_LVMlMK2rlmQQR7NYueV1psfdSh6fGcYoDxuiZnzybpSxP\
              5Fy8wGe-BgoL5EIPzzhfQBZagzliztLt8RarXHbXnK_KxN1GE5_q5V_ZvjpNr3FExuC\
              cKSvjhlkWR__CmTpv4FWZDkWXJgABLSd0Fe1soUNXMNaqzeTH-xSIYMv06Jckfky6Ds\
-             OKcqWyA5QGNScRkSh4fu4jkIiPlituJhFi3hYgIfGTGQMDt2TsiaUCZdfyLhipGwHzmMijeHiQ"
-                .to_owned(),
+             OKcqWyA5QGNScRkSh4fu4jkIiPlituJhFi3hYgIfGTGQMDt2TsiaUCZdfyLhipGwHzmMijeHiQ",
         );
 
         let jwks: JWKSet<Empty> = serde_json::from_str(
@@ -880,8 +868,7 @@ mod tests {
     fn compact_jws_decode_with_jwks_missing_parts() {
         let token = Compact::decode(
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
-             eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ"
-                .to_owned(),
+             eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ",
         );
 
         let jwks: JWKSet<Empty> = serde_json::from_str(
@@ -908,8 +895,7 @@ mod tests {
         let token = Compact::decode(
             "eyJhbGciOiJIUzM4NCIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
-                .to_owned(),
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
         );
 
         let jwks: JWKSet<Empty> = serde_json::from_str(
@@ -936,8 +922,7 @@ mod tests {
         let token = Compact::decode(
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
-                .to_owned(),
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
         );
 
         let jwks: JWKSet<Empty> = serde_json::from_str(
@@ -964,8 +949,7 @@ mod tests {
         let token = Compact::decode(
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             QhdrScTpNXF2d0RbG_UTWu2gPKZfzANj6XC4uh-wOoU"
-                .to_owned(),
+             QhdrScTpNXF2d0RbG_UTWu2gPKZfzANj6XC4uh-wOoU",
         );
 
         let jwks: JWKSet<Empty> = serde_json::from_str(
@@ -992,8 +976,7 @@ mod tests {
         let token = Compact::decode(
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
-                .to_owned(),
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
         );
 
         let jwks: JWKSet<Empty> = serde_json::from_str(
@@ -1020,8 +1003,7 @@ mod tests {
         let token = Compact::decode(
             "eyJhbGciOiAiRVMyNTYiLCJ0eXAiOiAiSldUIiwia2lkIjogImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
-                .to_owned(),
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
         );
 
         let jwks: JWKSet<Empty> = serde_json::from_str(
