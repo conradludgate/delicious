@@ -10,7 +10,6 @@ use super::{Header, RegisteredHeader, Secret};
 use crate::errors::{Error, ValidationError};
 use crate::jwa::SignatureAlgorithm;
 use crate::serde_custom;
-use data_encoding::BASE64URL_NOPAD;
 use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 
 // Not using CompactPart::to_bytes here, bounds are overly restrictive
@@ -23,13 +22,13 @@ fn serialize_header<H: Serialize>(header: &Header<H>) -> Result<Vec<u8>, serde_j
 // Warning: pay attention to parameter order
 // Note: this is valid UTF-8, but gets used as bytes later
 fn signing_input(protected_header: &[u8], payload: &[u8]) -> Vec<u8> {
-    let hlen = BASE64URL_NOPAD.encode_len(protected_header.len());
-    let plen = BASE64URL_NOPAD.encode_len(payload.len());
-    let mut r = Vec::with_capacity(hlen + plen + 1);
-    r.append(&mut BASE64URL_NOPAD.encode(protected_header).into_bytes());
-    r.push(b'.');
-    r.append(&mut BASE64URL_NOPAD.encode(payload).into_bytes());
-    r
+    let cap = (protected_header.len() * 4 / 3) + (payload.len() * 4 / 3) + 1;
+
+    let mut out = String::with_capacity(cap);
+    base64::encode_config_buf(protected_header, base64::URL_SAFE_NO_PAD, &mut out);
+    out.push('.');
+    base64::encode_config_buf(payload, base64::URL_SAFE_NO_PAD, &mut out);
+    out.into_bytes()
 }
 
 /// Data that can be turned into a JWS
@@ -315,7 +314,7 @@ mod tests {
     use super::{Header, Secret, Signable, SignedData};
     use crate::jwa::SignatureAlgorithm;
     use crate::jws::RegisteredHeader;
-    use crate::{ClaimsSet, CompactJson, CompactPart, Empty, RegisteredClaims, SingleOrMultiple};
+    use crate::{ClaimsSet, Empty, RegisteredClaims, SingleOrMultiple};
 
     #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
     struct PrivateClaims {
@@ -323,7 +322,7 @@ mod tests {
         department: String,
     }
 
-    impl CompactJson for PrivateClaims {}
+    // impl CompactJson for PrivateClaims {}
 
     // HS256 key - "secret"
     static HS256_PAYLOAD: &str = "{\"protected\":\"eyJhbGciOiJIUz\
@@ -366,7 +365,7 @@ mod tests {
                     algorithm: SignatureAlgorithm::None,
                     ..Default::default()
                 }),
-                expected_claims.to_bytes().unwrap(),
+                serde_json::to_vec(&expected_claims).unwrap(),
             )),
             Secret::None,
         ));
@@ -407,7 +406,7 @@ mod tests {
                     algorithm: SignatureAlgorithm::HS256,
                     ..Default::default()
                 }),
-                expected_claims.to_bytes().unwrap(),
+                serde_json::to_vec(&expected_claims).unwrap(),
             )),
             Secret::Bytes("secret".to_string().into_bytes())
         ));
@@ -469,7 +468,7 @@ mod tests {
                     algorithm: SignatureAlgorithm::RS256,
                     ..Default::default()
                 }),
-                expected_claims.to_bytes().unwrap(),
+                serde_json::to_vec(&expected_claims).unwrap(),
             )),
             private_key,
         ));
@@ -490,8 +489,6 @@ mod tests {
 
     #[test]
     fn flattened_jws_verify_es256() {
-        use data_encoding::HEXUPPER;
-
         // This is a ECDSA Public key in `SubjectPublicKey` form.
         // Conversion is not available in `ring` yet.
         // See https://github.com/lawliet89/biscuit/issues/71#issuecomment-296445140 for a
@@ -503,7 +500,7 @@ mod tests {
             \"payload\":\"eyJ0b2tlbl90eXBlIjoic2VydmljZSIsImlhdCI6MTQ5MjkzODU4OH0\",\
             \"protected\":\"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9\",\
             \"signature\":\"do_XppIOFthPWlTXL95CIBfgRdyAxbcIsUfM0YxMjCjqvp4ehHFA3I-JasABKzC8CAy4ndhCHsZdpAtKkqZMEA\"}";
-        let signing_secret = Secret::PublicKey(not_err!(HEXUPPER.decode(public_key.as_bytes())));
+        let signing_secret = Secret::PublicKey(hex::decode(public_key).unwrap());
 
         let token = not_err!(SignedData::verify_flattened(
             jwt.as_bytes(),
@@ -552,7 +549,7 @@ mod tests {
         let expected_jwt = not_err!(SignedData::sign(
             not_err!(Signable::new(
                 header.clone(),
-                expected_claims.to_bytes().unwrap()
+                serde_json::to_vec(&expected_claims).unwrap(),
             )),
             Secret::Bytes("secret".to_string().into_bytes())
         ));

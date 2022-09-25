@@ -13,18 +13,16 @@ keywords = ["jwt", "json", "jose", "jwe", "jws"]
 categories = ["authentication", "web-programming"]
 
 [dependencies]
-time = { version = "0.3", default-features = false, features = ["serde"] }
-data-encoding = "2.3.2"
+base64 = "0.13"
+time = { version = "0.3", default-features = false, features = ["std", "serde"] }
 once_cell = "1.8.0"
 num-bigint = "0.4"
 num-traits = "0.2"
 ring = "~0.16.20"
 serde = { version = "1.0.126", features=["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
+smallvec = "1.9.0"
 
 [dev-dependencies]
 serde_test = "1.0"
-
-[features]
-# Treat warnings as a build error.
-strict = []
+hex = "0.4"

@@ -29,6 +29,7 @@ impl Header for UmamiCache {
         values
             .next()
             .and_then(|v| v.to_str().ok())
+            .map(String::from)
             .map(delicious_jose::Compact::decode)
             .map(UmamiCache)
             .ok_or_else(headers_core::Error::invalid)
@@ -37,7 +38,8 @@ impl Header for UmamiCache {
     fn encode<E: Extend<HeaderValue>>(&self, values: &mut E) {
         let value = self
             .0
-            .encode()
+            .clone()
+            .into_inner()
             .as_str()
             .parse()
             .expect("Mime is always a valid HeaderValue");

@@ -4,7 +4,6 @@
 
 use std::fmt;
 
-use data_encoding::BASE64URL_NOPAD;
 use num_bigint::BigUint;
 use serde::de::{self, DeserializeOwned};
 use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
@@ -336,7 +335,10 @@ impl AlgorithmParameters {
         }
         map.end()?;
         let json_u8 = serializer.into_inner();
-        Ok(BASE64URL_NOPAD.encode(ring::digest::digest(algorithm.0, &json_u8).as_ref()))
+        Ok(base64::encode_config(
+            ring::digest::digest(algorithm.0, &json_u8).as_ref(),
+            base64::URL_SAFE_NO_PAD,
+        ))
     }
 }
 

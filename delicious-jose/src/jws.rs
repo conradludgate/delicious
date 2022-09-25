@@ -11,11 +11,11 @@ pub use flattened::{Signable, SignedData};
 use crate::errors::Error;
 use crate::jwa::SignatureAlgorithm;
 use crate::jwk;
-use crate::{CompactJson, Empty};
+use crate::Empty;
 
 use num_bigint::BigUint;
 use ring::signature;
-use serde::{self, de::DeserializeOwned, Deserialize, Serialize};
+use serde::{self, Deserialize, Serialize};
 use std::sync::Arc;
 
 /// The secrets used to sign and/or encrypt tokens
@@ -230,7 +230,7 @@ pub struct Header<T> {
     pub private: T,
 }
 
-impl<T: Serialize + DeserializeOwned> CompactJson for Header<T> {}
+// impl<T: Serialize + DeserializeOwned> CompactJson for Header<T> {}
 
 impl Header<Empty> {
     /// Convenience function to create a header with only registered headers

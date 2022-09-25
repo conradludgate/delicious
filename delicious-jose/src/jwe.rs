@@ -5,8 +5,6 @@
 //! you will want to look at the  [`Compact`](enum.Compact.html) enum.
 use std::fmt;
 
-use data_encoding::BASE64URL_NOPAD;
-
 use serde::de::{self, DeserializeOwned};
 use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
 
@@ -15,7 +13,7 @@ use crate::jwa::{
     self, ContentEncryptionAlgorithm, EncryptionOptions, EncryptionResult, KeyManagementAlgorithm,
 };
 use crate::jwk;
-use crate::{CompactJson, CompactPart, Empty};
+use crate::Empty;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 /// Compression algorithm applied to plaintext before encryption.
@@ -182,7 +180,7 @@ pub struct Header<T> {
     pub private: T,
 }
 
-impl<T: Serialize + DeserializeOwned> CompactJson for Header<T> {}
+// impl<T: Serialize + DeserializeOwned> CompactJson for Header<T> {}
 
 impl<T: Serialize + DeserializeOwned> Header<T> {
     /// Update CEK algorithm specific header fields based on a CEK encryption result
@@ -316,7 +314,7 @@ pub enum Compact<T, H> {
 
 impl<T, H> Compact<T, H>
 where
-    T: CompactPart,
+    T: Serialize + DeserializeOwned,
     H: Serialize + DeserializeOwned + Clone,
 {
     /// Create a new encrypted JWE
@@ -326,7 +324,7 @@ where
 
     /// Create a new encrypted JWE
     pub fn new_encrypted(token: &str) -> Self {
-        Compact::Encrypted(crate::Compact::decode(token))
+        Compact::Encrypted(crate::Compact::decode(token.to_owned()))
     }
 
     /// Consumes self and encrypt it. If the token is already encrypted, this is a no-op.
@@ -409,14 +407,15 @@ where
                 // this as part of the encryption process later
 
                 // Step 11 involves compressing the payload, which we do not support at the moment
-                let payload = payload.to_bytes()?;
+                let payload = serde_json::to_vec(payload)?;
                 if header.registered.compression_algorithm.is_some() {
                     Err(Error::UnsupportedOperation)?
                 }
 
                 // Steps 12 to 14 involves the calculation of `Additional Authenticated Data` for encryption. In
                 // our compact example, our header is the AAD.
-                let encoded_protected_header = BASE64URL_NOPAD.encode(&header.to_bytes()?);
+                let encoded_protected_header =
+                    base64::encode_config(&serde_json::to_vec(&header)?, base64::URL_SAFE_NO_PAD);
                 // Step 15 involves the actual encryption.
                 let encrypted_payload = header.registered.enc_algorithm.encrypt(
                     &payload,
@@ -426,12 +425,12 @@ where
                 )?;
 
                 // Finally create the JWE
-                let mut compact = crate::Compact::with_capacity(5);
+                let mut compact = crate::Compact::new();
                 compact.push(&header)?;
-                compact.push(&encrypted_cek.encrypted)?;
-                compact.push(&encrypted_payload.nonce)?;
-                compact.push(&encrypted_payload.encrypted)?;
-                compact.push(&encrypted_payload.tag)?;
+                compact.push_bytes(&encrypted_cek.encrypted);
+                compact.push_bytes(&encrypted_payload.nonce);
+                compact.push_bytes(&encrypted_payload.encrypted);
+                compact.push_bytes(&encrypted_payload.tag);
 
                 Ok(Compact::Encrypted(compact))
             }
@@ -470,11 +469,11 @@ where
                 }
                 // RFC 7516 Section 5.2 describes the steps involved in decryption.
                 // Steps 1-3
-                let mut header: Header<H> = encrypted.part(0)?;
-                let encrypted_cek: Vec<u8> = encrypted.part(1)?;
-                let nonce: Vec<u8> = encrypted.part(2)?;
-                let encrypted_payload: Vec<u8> = encrypted.part(3)?;
-                let tag: Vec<u8> = encrypted.part(4)?;
+                let mut header: Header<H> = encrypted.deser_part(0)?;
+                let encrypted_cek = encrypted.part_decoded(1)?;
+                let nonce = encrypted.part_decoded(2)?;
+                let encrypted_payload = encrypted.part_decoded(3)?;
+                let tag = encrypted.part_decoded(4)?;
 
                 // Verify that the algorithms are expected
                 if header.registered.cek_algorithm != cek_alg
@@ -496,8 +495,7 @@ where
                 )?;
 
                 // Build encryption result as per steps 14-15
-                let protected_header: Vec<u8> = encrypted.part(0)?;
-                let encoded_protected_header = BASE64URL_NOPAD.encode(protected_header.as_ref());
+                let encoded_protected_header = encrypted.part(0)?;
                 let encrypted_payload_result = EncryptionResult {
                     nonce,
                     tag,
@@ -515,7 +513,7 @@ where
                     Err(Error::UnsupportedOperation)?
                 }
 
-                let payload = T::from_bytes(&payload)?;
+                let payload = serde_json::from_slice::<T>(&payload)?;
 
                 Ok(Compact::new_decrypted(header, payload))
             }
@@ -599,7 +597,7 @@ where
 /// Convenience implementation for a Compact that contains a `ClaimsSet`
 impl<P, H> Compact<crate::ClaimsSet<P>, H>
 where
-    crate::ClaimsSet<P>: CompactPart,
+    crate::ClaimsSet<P>: Serialize + DeserializeOwned,
     H: Serialize + DeserializeOwned + Clone,
 {
     /// Validate the temporal claims in the decoded token
@@ -712,7 +710,7 @@ mod tests {
           from jwcrypto import jwk, jwe
           from jwcrypto.common import json_encode
           key = jwk.JWK.generate(kty='oct', size=256)
-          payload = "Encrypted"
+          payload = '"Encrypted"'
           jwetoken = jwe.JWE(payload.encode('utf-8'),
                              json_encode({"alg": "dir",
                                           "enc": "A256GCM"}))
@@ -720,11 +718,11 @@ mod tests {
           jwetoken.serialize()
           key.export()
         */
-        let external_token = "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..7-eXscPDD5DI4kTT.SUQuqkzIrp6j.QaNRHGYXtKC2lj11rgKDpw";
-        let key_json = r#"{"k":"YKaiJrr6_-PY8DJelu3rWrxVQQ24tnE9XGIRdZTy9ys","kty":"oct"}"#;
+        let external_token = "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..fHhEyBZ9S4CsGi1Y.gnTZjScRZu22rvk.F8SJn0TUAus8w_TaItsOJw";
+        let key_json = r#"{"k":"-wcjSeVOJ0V43ij5uDBeFlOR1w2T40jqIfICQb8-sUw","kty":"oct"}"#;
 
         let key: jwk::JWK<Empty> = not_err!(serde_json::from_str(key_json));
-        let token: Compact<Vec<u8>, Empty> = Compact::new_encrypted(external_token);
+        let token: Compact<String, Empty> = Compact::new_encrypted(external_token);
 
         let decrypted_jwe = not_err!(token.decrypt(
             &key,
@@ -732,9 +730,8 @@ mod tests {
             jwa::ContentEncryptionAlgorithm::A256GCM,
         ));
 
-        let decrypted_payload: &Vec<u8> = not_err!(decrypted_jwe.payload());
-        let decrypted_str = not_err!(std::str::from_utf8(decrypted_payload));
-        assert_eq!(decrypted_str, "Encrypted");
+        let decrypted_payload = not_err!(decrypted_jwe.payload());
+        assert_eq!(decrypted_payload, "Encrypted");
     }
 
     #[test]
@@ -788,20 +785,19 @@ mod tests {
 
     #[test]
     fn jwe_a256gcmkw_a256gcm_string_round_trip() {
-        use std::str;
-
         // Construct the encryption key
         let key = cek_oct_key(256 / 8);
 
         // Construct the JWE
-        let payload = "The true sign of intelligence is not knowledge but imagination.";
+        let payload =
+            String::from("The true sign of intelligence is not knowledge but imagination.");
         let jwe = Compact::new_decrypted(
             From::from(RegisteredHeader {
                 cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
                 ..Default::default()
             }),
-            payload.as_bytes().to_vec(),
+            payload.clone(),
         );
         let options = EncryptionOptions::AES_GCM {
             nonce: random_aes_gcm_nonce().unwrap(),
@@ -813,18 +809,18 @@ mod tests {
         {
             // Check that new header values are added
             let compact = not_err!(encrypted_jwe.encrypted());
-            let header: Header<Empty> = not_err!(compact.part(0));
+            let header: Header<Empty> = compact.deser_part(0).unwrap();
             assert!(header.cek_algorithm.nonce.is_some());
             assert!(header.cek_algorithm.tag.is_some());
 
             // Check that the encrypted key part is not empty
-            let cek: Vec<u8> = not_err!(compact.part(1));
+            let cek: Vec<u8> = compact.part_decoded(1).unwrap();
             assert_eq!(256 / 8, cek.len());
         }
 
         // Serde test
         let json = not_err!(serde_json::to_string(&encrypted_jwe));
-        let deserialized_json: Compact<Vec<u8>, Empty> = not_err!(serde_json::from_str(&json));
+        let deserialized_json: Compact<String, Empty> = not_err!(serde_json::from_str(&json));
         assert_eq!(deserialized_json, encrypted_jwe);
 
         // Decrypt
@@ -835,9 +831,8 @@ mod tests {
         ));
         assert_eq!(jwe, decrypted_jwe);
 
-        let decrypted_payload: &Vec<u8> = not_err!(decrypted_jwe.payload());
-        let decrypted_str = not_err!(str::from_utf8(decrypted_payload));
-        assert_eq!(decrypted_str, payload);
+        let decrypted_str = not_err!(decrypted_jwe.payload());
+        assert_eq!(decrypted_str, &payload);
     }
 
     #[test]
@@ -889,12 +884,12 @@ mod tests {
         {
             // Check that new header values are added
             let compact = not_err!(encrypted_jwe.encrypted());
-            let header: Header<Empty> = not_err!(compact.part(0));
+            let header: Header<Empty> = compact.deser_part(0).unwrap();
             assert!(header.cek_algorithm.nonce.is_some());
             assert!(header.cek_algorithm.tag.is_some());
 
             // Check that the encrypted key part is not empty
-            let cek: Vec<u8> = not_err!(compact.part(1));
+            let cek: Vec<u8> = compact.part_decoded(1).unwrap();
             assert_eq!(256 / 8, cek.len());
         }
 
@@ -964,12 +959,12 @@ mod tests {
         {
             let compact = not_err!(encrypted_jwe.encrypted());
             // Check that new header values are empty
-            let header: Header<Empty> = not_err!(compact.part(0));
+            let header: Header<Empty> = compact.deser_part(0).unwrap();
             assert!(header.cek_algorithm.nonce.is_none());
             assert!(header.cek_algorithm.tag.is_none());
 
             // Check that the encrypted key part is empty
-            let cek: Vec<u8> = not_err!(compact.part(1));
+            let cek: Vec<u8> = compact.part_decoded(1).unwrap();
             assert!(cek.is_empty());
         }
 
@@ -1092,12 +1087,22 @@ mod tests {
         let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
 
         // Modify the JWE
-        let mut compact = encrypted_jwe.unwrap_encrypted();
-        let mut header: Header<Empty> = not_err!(compact.part(0));
+        let compact = encrypted_jwe.unwrap_encrypted();
+        let mut header: Header<Empty> = compact.deser_part(0).unwrap();
         header.cek_algorithm.nonce = Some(vec![0; 96 / 8]);
-        compact.parts[0] = not_err!(header.to_base64());
+        let s = format!(
+            "{}.{}.{}.{}.{}",
+            base64::encode_config(
+                serde_json::to_string(&header).unwrap(),
+                base64::URL_SAFE_NO_PAD
+            ),
+            compact.part(1).unwrap(),
+            compact.part(2).unwrap(),
+            compact.part(3).unwrap(),
+            compact.part(4).unwrap()
+        );
 
-        let encrypted_jwe = Compact::<Empty, Empty>::new_encrypted(&compact.to_string());
+        let encrypted_jwe = Compact::<Empty, Empty>::new_encrypted(&s);
         let _ = encrypted_jwe
             .into_decrypted(
                 &key,
@@ -1131,12 +1136,22 @@ mod tests {
         let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
 
         // Modify the JWE
-        let mut compact = encrypted_jwe.unwrap_encrypted();
-        let mut header: Header<Empty> = not_err!(compact.part(0));
+        let compact = encrypted_jwe.unwrap_encrypted();
+        let mut header: Header<Empty> = compact.deser_part(0).unwrap();
         header.cek_algorithm.tag = Some(vec![0; 96 / 8]);
-        compact.parts[0] = not_err!(header.to_base64());
+        let s = format!(
+            "{}.{}.{}.{}.{}",
+            base64::encode_config(
+                serde_json::to_string(&header).unwrap(),
+                base64::URL_SAFE_NO_PAD
+            ),
+            compact.part(1).unwrap(),
+            compact.part(2).unwrap(),
+            compact.part(3).unwrap(),
+            compact.part(4).unwrap()
+        );
 
-        let encrypted_jwe = Compact::<Empty, Empty>::new_encrypted(&compact.to_string());
+        let encrypted_jwe = Compact::<Empty, Empty>::new_encrypted(&s);
         let _ = encrypted_jwe
             .into_decrypted(
                 &key,
@@ -1170,10 +1185,17 @@ mod tests {
         let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
 
         // Modify the JWE
-        let mut compact = encrypted_jwe.unwrap_encrypted();
-        compact.parts[4] = not_err!(vec![0u8; 1].to_base64());
+        let compact = encrypted_jwe.unwrap_encrypted();
+        let s = format!(
+            "{}.{}.{}.{}.{}",
+            compact.part(0).unwrap(),
+            compact.part(1).unwrap(),
+            compact.part(2).unwrap(),
+            compact.part(3).unwrap(),
+            base64::encode_config(&[0], base64::URL_SAFE_NO_PAD),
+        );
 
-        let encrypted_jwe = Compact::<Empty, Empty>::new_encrypted(&compact.to_string());
+        let encrypted_jwe = Compact::<Empty, Empty>::new_encrypted(&s);
         let _ = encrypted_jwe
             .into_decrypted(
                 &key,
@@ -1208,12 +1230,22 @@ mod tests {
         let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
 
         // Modify the JWE
-        let mut compact = encrypted_jwe.unwrap_encrypted();
-        let mut header: Header<Empty> = not_err!(compact.part(0));
+        let compact = encrypted_jwe.unwrap_encrypted();
+        let mut header: Header<Empty> = compact.deser_part(0).unwrap();
         header.registered.media_type = Some("JOSE+JSON".to_string());
-        compact.parts[0] = not_err!(header.to_base64());
+        let s = format!(
+            "{}.{}.{}.{}.{}",
+            base64::encode_config(
+                serde_json::to_string(&header).unwrap(),
+                base64::URL_SAFE_NO_PAD
+            ),
+            compact.part(1).unwrap(),
+            compact.part(2).unwrap(),
+            compact.part(3).unwrap(),
+            compact.part(4).unwrap()
+        );
 
-        let encrypted_jwe = Compact::<Empty, Empty>::new_encrypted(&compact.to_string());
+        let encrypted_jwe = Compact::<Empty, Empty>::new_encrypted(&s);
         let _ = encrypted_jwe
             .into_decrypted(
                 &key,
@@ -1248,10 +1280,17 @@ mod tests {
         let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
 
         // Modify the JWE
-        let mut compact = encrypted_jwe.unwrap_encrypted();
-        compact.parts[1] = not_err!(vec![0u8; 256 / 8].to_base64());
+        let compact = encrypted_jwe.unwrap_encrypted();
+        let s = format!(
+            "{}.{}.{}.{}.{}",
+            compact.part(0).unwrap(),
+            base64::encode_config(vec![0u8; 256 / 8], base64::URL_SAFE_NO_PAD),
+            compact.part(2).unwrap(),
+            compact.part(3).unwrap(),
+            compact.part(4).unwrap()
+        );
 
-        let encrypted_jwe = Compact::<Empty, Empty>::new_encrypted(&compact.to_string());
+        let encrypted_jwe = Compact::<Empty, Empty>::new_encrypted(&s);
         let _ = encrypted_jwe
             .into_decrypted(
                 &key,
@@ -1286,12 +1325,17 @@ mod tests {
         let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
 
         // Modify the JWE
-        let mut compact = encrypted_jwe.unwrap_encrypted();
-        let mut header: Header<Empty> = not_err!(compact.part(0));
-        header.registered.media_type = Some("JOSE+JSON".to_string());
-        compact.parts[3] = not_err!(vec![0u8; 32].to_base64());
+        let compact = encrypted_jwe.unwrap_encrypted();
+        let s = format!(
+            "{}.{}.{}.{}.{}",
+            compact.part(0).unwrap(),
+            compact.part(1).unwrap(),
+            compact.part(2).unwrap(),
+            base64::encode_config(vec![0u8; 32], base64::URL_SAFE_NO_PAD),
+            compact.part(4).unwrap()
+        );
 
-        let encrypted_jwe = Compact::<Empty, Empty>::new_encrypted(&compact.to_string());
+        let encrypted_jwe = Compact::<Empty, Empty>::new_encrypted(&s);
         let _ = encrypted_jwe
             .into_decrypted(
                 &key,
@@ -1326,12 +1370,17 @@ mod tests {
         let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
 
         // Modify the JWE
-        let mut compact = encrypted_jwe.unwrap_encrypted();
-        let mut header: Header<Empty> = not_err!(compact.part(0));
-        header.registered.media_type = Some("JOSE+JSON".to_string());
-        compact.parts[2] = not_err!(vec![0u8; 96 / 8].to_base64());
+        let compact = encrypted_jwe.unwrap_encrypted();
+        let s = format!(
+            "{}.{}.{}.{}.{}",
+            compact.part(0).unwrap(),
+            compact.part(1).unwrap(),
+            base64::encode_config(vec![0u8; 96 / 8], base64::URL_SAFE_NO_PAD),
+            compact.part(3).unwrap(),
+            compact.part(4).unwrap()
+        );
 
-        let encrypted_jwe = Compact::<Empty, Empty>::new_encrypted(&compact.to_string());
+        let encrypted_jwe = Compact::<Empty, Empty>::new_encrypted(&s);
         let _ = encrypted_jwe
             .into_decrypted(
                 &key,

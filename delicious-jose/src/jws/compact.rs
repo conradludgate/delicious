@@ -5,7 +5,6 @@ use std::str;
 use crate::errors::{DecodeError, Error, ValidationError};
 use crate::jwa::{Algorithm, SignatureAlgorithm};
 use crate::jwk::{AlgorithmParameters, JWKSet};
-use crate::CompactPart;
 
 use super::{Header, Secret};
 
@@ -39,7 +38,7 @@ pub enum Compact<T, H> {
 
 impl<T, H> Compact<T, H>
 where
-    T: CompactPart,
+    T: Serialize + DeserializeOwned,
     H: Serialize + DeserializeOwned,
 {
     /// New decoded JWT
@@ -49,7 +48,7 @@ where
 
     /// New encoded JWT
     pub fn new_encoded(token: &str) -> Self {
-        Compact::Encoded(crate::Compact::decode(token))
+        Compact::Encoded(crate::Compact::decode(token.to_owned()))
     }
 
     /// Consumes self and convert into encoded form. If the token is already encoded,
@@ -70,15 +69,15 @@ where
                 ref header,
                 ref payload,
             } => {
-                let mut compact = crate::Compact::with_capacity(3);
+                let mut compact = crate::Compact::new();
                 compact.push(header)?;
                 compact.push(payload)?;
-                let encoded_payload = compact.encode();
+                let encoded_payload = compact.clone().into_inner();
                 let signature = header
                     .registered
                     .algorithm
                     .sign(encoded_payload.as_bytes(), secret)?;
-                compact.push(&signature)?;
+                compact.push_bytes(&signature);
                 Ok(Compact::Encoded(compact))
             }
             Compact::Encoded(_) => Err(Error::UnsupportedOperation),
@@ -112,18 +111,19 @@ where
                     })?
                 }
 
-                let signature: Vec<u8> = encoded.part(2)?;
-                let payload = &encoded.parts[0..2].join(".");
+                let signature = encoded.part_decoded(2)?;
+                let payload = encoded.clone().into_inner();
+                let payload = payload.rsplit_once('.').unwrap().0;
 
                 algorithm
                     .verify(signature.as_ref(), payload.as_ref(), secret)
                     .map_err(|_| ValidationError::InvalidSignature)?;
 
-                let header: Header<H> = encoded.part(0)?;
+                let header: Header<H> = encoded.deser_part(0)?;
                 if header.registered.algorithm != algorithm {
                     Err(ValidationError::WrongAlgorithmHeader)?;
                 }
-                let decoded_claims: T = encoded.part(1)?;
+                let decoded_claims: T = encoded.deser_part(1)?;
 
                 Ok(Self::new_decoded(header, decoded_claims))
             }
@@ -154,10 +154,11 @@ where
                     })?
                 }
 
-                let signature: Vec<u8> = encoded.part(2)?;
-                let payload = &encoded.parts[0..2].join(".");
+                let signature = encoded.part_decoded(2)?;
+                let payload = encoded.clone().into_inner();
+                let payload = payload.rsplit_once('.').unwrap().0;
 
-                let header: Header<H> = encoded.part(0)?;
+                let header: Header<H> = encoded.deser_part(0)?;
                 let key_id = header
                     .registered
                     .key_id
@@ -205,7 +206,7 @@ where
                     .verify(signature.as_ref(), payload.as_ref(), &secret)
                     .map_err(|_| ValidationError::InvalidSignature)?;
 
-                let decoded_claims: T = encoded.part(1)?;
+                let decoded_claims: T = encoded.deser_part(1)?;
 
                 Ok(Self::new_decoded(header, decoded_claims))
             }
@@ -291,7 +292,7 @@ where
     pub fn unverified_header(&self) -> Result<Header<H>, Error> {
         match *self {
             Compact::Decoded { .. } => Err(Error::UnsupportedOperation),
-            Compact::Encoded(ref compact) => compact.part(0),
+            Compact::Encoded(ref compact) => compact.deser_part(0),
         }
     }
 
@@ -302,7 +303,7 @@ where
     pub fn unverified_payload(&self) -> Result<T, Error> {
         match *self {
             Compact::Decoded { .. } => Err(Error::UnsupportedOperation),
-            Compact::Encoded(ref compact) => compact.part(1),
+            Compact::Encoded(ref compact) => compact.deser_part(1),
         }
     }
 
@@ -310,7 +311,7 @@ where
     pub fn signature(&self) -> Result<Vec<u8>, Error> {
         match *self {
             Compact::Decoded { .. } => Err(Error::UnsupportedOperation),
-            Compact::Encoded(ref compact) => compact.part(2),
+            Compact::Encoded(ref compact) => compact.part_decoded(2),
         }
     }
 }
@@ -318,7 +319,7 @@ where
 /// Convenience implementation for a Compact that contains a `ClaimsSet`
 impl<P, H> Compact<crate::ClaimsSet<P>, H>
 where
-    crate::ClaimsSet<P>: CompactPart,
+    crate::ClaimsSet<P>: Serialize + DeserializeOwned,
     H: Serialize + DeserializeOwned,
 {
     /// Validate the temporal claims in the decoded token
@@ -333,19 +334,19 @@ where
     }
 }
 
-/// Implementation for embedded inside a JWE.
-// FIXME: Maybe use a separate trait instead?
-impl<T: CompactPart, H: Serialize + DeserializeOwned> CompactPart for Compact<T, H> {
-    fn to_bytes(&self) -> Result<Vec<u8>, Error> {
-        let encoded = self.encoded()?;
-        Ok(encoded.to_string().into_bytes())
-    }
+// /// Implementation for embedded inside a JWE.
+// // FIXME: Maybe use a separate trait instead?
+// impl<T: CompactPart, H: Serialize + DeserializeOwned> CompactPart for Compact<T, H> {
+//     fn to_bytes(&self) -> Result<Vec<u8>, Error> {
+//         let encoded = self.encoded()?;
+//         Ok(encoded.to_string().into_bytes())
+//     }
 
-    fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-        let string = str::from_utf8(bytes)?;
-        Ok(Self::new_encoded(string))
-    }
-}
+//     fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+//         let string = str::from_utf8(bytes)?;
+//         Ok(Self::new_encoded(string))
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -356,7 +357,7 @@ mod tests {
     use super::{Compact, Header, Secret, SignatureAlgorithm};
     use crate::jwk::JWKSet;
     use crate::jws::RegisteredHeader;
-    use crate::{ClaimsSet, CompactJson, Empty, RegisteredClaims, SingleOrMultiple};
+    use crate::{ClaimsSet, Empty, RegisteredClaims, SingleOrMultiple};
 
     #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
     struct PrivateClaims {
@@ -364,7 +365,7 @@ mod tests {
         department: String,
     }
 
-    impl CompactJson for PrivateClaims {}
+    // impl CompactJson for PrivateClaims {}
 
     // HS256 key - "secret"
     static HS256_PAYLOAD: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.\
@@ -531,8 +532,6 @@ mod tests {
 
     #[test]
     fn compact_jws_verify_es256() {
-        use data_encoding::HEXUPPER;
-
         // This is a ECDSA Public key in `SubjectPublicKey` form.
         // Conversion is not available in `ring` yet.
         // See https://github.com/lawliet89/biscuit/issues/71#issuecomment-296445140 for a
@@ -544,7 +543,7 @@ mod tests {
                    eyJ0b2tlbl90eXBlIjoic2VydmljZSIsImlhdCI6MTQ5MjkzODU4OH0.\
                    do_XppIOFthPWlTXL95CIBfgRdyAxbcIsUfM0YxMjCjqvp4ehHFA3I-JasABKzC8CAy4ndhCHsZdpAtK\
                    kqZMEA";
-        let signing_secret = Secret::PublicKey(not_err!(HEXUPPER.decode(public_key.as_bytes())));
+        let signing_secret = Secret::PublicKey(hex::decode(public_key.as_bytes()).unwrap());
 
         let token = Compact::<ClaimsSet<serde_json::Value>, Empty>::new_encoded(jwt);
         let _ = not_err!(token.into_decoded(&signing_secret, SignatureAlgorithm::ES256));
@@ -648,8 +647,11 @@ mod tests {
     #[test]
     fn compact_jws_round_trip_hs256_for_bytes_payload() {
         let expected_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IlJhbmRvbSBieXRlcyJ9.\
-             eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcG\
-             xlLmNvbS9pc19yb290Ijp0cnVlfQ.E5ahoj_gMO8WZzSUhquWuBkPLGZm18zaLbyHUQA7TIs";
+            WzEyMywzNCwxMDUsMTE1LDExNSwzNCw1OCwzNCwxMDYsMTExLDEwMSwzNCw0NCwxMywxMCwzMiwzNCwxMDEs\
+            MTIwLDExMiwzNCw1OCw0OSw1MSw0OCw0OCw1Niw0OSw1Nyw1MSw1Niw0OCw0NCwxMywxMCwzMiwzNCwxMDQs\
+            MTE2LDExNiwxMTIsNTgsNDcsNDcsMTAxLDEyMCw5NywxMDksMTEyLDEwOCwxMDEsNDYsOTksMTExLDEwOSw0\
+            NywxMDUsMTE1LDk1LDExNCwxMTEsMTExLDExNiwzNCw1OCwxMTYsMTE0LDExNywxMDEsMTI1XQ.\
+            Dkgt7e34IW2Hxs-k2CLvKxB0szXgRbnHnr5gr1H4-Yg";
         let payload: Vec<u8> = vec![
             123, 34, 105, 115, 115, 34, 58, 34, 106, 111, 101, 34, 44, 13, 10, 32, 34, 101, 120,
             112, 34, 58, 49, 51, 48, 48, 56, 49, 57, 51, 56, 48, 44, 13, 10, 32, 34, 104, 116, 116,
@@ -786,7 +788,7 @@ mod tests {
 
         let _ = token
             .decode_with_jwks(&jwks, Some(SignatureAlgorithm::HS256))
-            .expect("to succeed");
+            .unwrap();
     }
 
     /// JWK has no algorithm and user provided a header not-matching expected algorithm
@@ -1081,9 +1083,11 @@ mod tests {
     fn signature_is_returned_correctly() {
         let encoded_token: Compact<ClaimsSet<PrivateClaims>, Empty> =
             Compact::new_encoded(HS256_PAYLOAD);
-        let expected_signature = data_encoding::BASE64URL_NOPAD
-            .decode(b"VFCl2un1Kc17odzOe2Ehf4DVrWddu3U4Ux3GFpOZHtc")
-            .expect("to not error");
+        let expected_signature = base64::decode_config(
+            "VFCl2un1Kc17odzOe2Ehf4DVrWddu3U4Ux3GFpOZHtc",
+            base64::URL_SAFE_NO_PAD,
+        )
+        .unwrap();
 
         let signature = not_err!(encoded_token.signature());
         assert_eq!(signature, expected_signature);
