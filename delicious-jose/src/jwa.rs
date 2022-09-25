@@ -498,16 +498,16 @@ impl KeyManagementAlgorithm {
     where
         T: Serialize + DeserializeOwned,
     {
-        use self::KeyManagementAlgorithm::*;
+        use self::KeyManagementAlgorithm::{DirectSymmetricKey, A128GCMKW, A256GCMKW};
 
         match self {
-            DirectSymmetricKey => self.cek_direct(key),
-            A128GCMKW | A256GCMKW => self.cek_aes_gcm(content_alg),
+            DirectSymmetricKey => Self::cek_direct(key),
+            A128GCMKW | A256GCMKW => Self::cek_aes_gcm(content_alg),
             _ => Err(Error::UnsupportedOperation),
         }
     }
 
-    fn cek_direct<T>(self, key: &jwk::JWK<T>) -> Result<jwk::JWK<Empty>, Error>
+    fn cek_direct<T>(key: &jwk::JWK<T>) -> Result<jwk::JWK<Empty>, Error>
     where
         T: Serialize + DeserializeOwned,
     {
@@ -517,10 +517,7 @@ impl KeyManagementAlgorithm {
         }
     }
 
-    fn cek_aes_gcm(
-        self,
-        content_alg: ContentEncryptionAlgorithm,
-    ) -> Result<jwk::JWK<Empty>, Error> {
+    fn cek_aes_gcm(content_alg: ContentEncryptionAlgorithm) -> Result<jwk::JWK<Empty>, Error> {
         let key = content_alg.generate_key()?;
         Ok(jwk::JWK {
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
@@ -543,7 +540,7 @@ impl KeyManagementAlgorithm {
         key: &jwk::JWK<T>,
         options: &EncryptionOptions,
     ) -> Result<EncryptionResult, Error> {
-        use self::KeyManagementAlgorithm::*;
+        use self::KeyManagementAlgorithm::{DirectSymmetricKey, A128GCMKW, A192GCMKW, A256GCMKW};
 
         match self {
             A128GCMKW | A192GCMKW | A256GCMKW => self.aes_gcm_encrypt(payload, key, options),
@@ -565,7 +562,7 @@ impl KeyManagementAlgorithm {
         content_alg: ContentEncryptionAlgorithm,
         key: &jwk::JWK<T>,
     ) -> Result<jwk::JWK<Empty>, Error> {
-        use self::KeyManagementAlgorithm::*;
+        use self::KeyManagementAlgorithm::{DirectSymmetricKey, A128GCMKW, A192GCMKW, A256GCMKW};
 
         match self {
             A128GCMKW | A192GCMKW | A256GCMKW => self.aes_gcm_decrypt(encrypted, content_alg, key),
@@ -580,7 +577,7 @@ impl KeyManagementAlgorithm {
         key: &jwk::JWK<T>,
         options: &EncryptionOptions,
     ) -> Result<EncryptionResult, Error> {
-        use self::KeyManagementAlgorithm::*;
+        use self::KeyManagementAlgorithm::{A128GCMKW, A256GCMKW};
 
         let algorithm = match self {
             A128GCMKW => &aead::AES_128_GCM,
@@ -606,7 +603,7 @@ impl KeyManagementAlgorithm {
         content_alg: ContentEncryptionAlgorithm,
         key: &jwk::JWK<T>,
     ) -> Result<jwk::JWK<Empty>, Error> {
-        use self::KeyManagementAlgorithm::*;
+        use self::KeyManagementAlgorithm::{A128GCMKW, A256GCMKW};
 
         let algorithm = match self {
             A128GCMKW => &aead::AES_128_GCM,
@@ -633,7 +630,7 @@ impl KeyManagementAlgorithm {
 impl ContentEncryptionAlgorithm {
     /// Convenience function to generate a new random key with the required length
     pub fn generate_key(self) -> Result<Vec<u8>, Error> {
-        use self::ContentEncryptionAlgorithm::*;
+        use self::ContentEncryptionAlgorithm::{A128GCM, A256GCM};
 
         let length: usize = match self {
             A128GCM => 128 / 8,
@@ -654,7 +651,7 @@ impl ContentEncryptionAlgorithm {
         key: &jwk::JWK<T>,
         options: &EncryptionOptions,
     ) -> Result<EncryptionResult, Error> {
-        use self::ContentEncryptionAlgorithm::*;
+        use self::ContentEncryptionAlgorithm::{A128GCM, A192GCM, A256GCM};
 
         match self {
             A128GCM | A192GCM | A256GCM => self.aes_gcm_encrypt(payload, aad, key, options),
@@ -668,7 +665,7 @@ impl ContentEncryptionAlgorithm {
         encrypted: &EncryptionResult,
         key: &jwk::JWK<T>,
     ) -> Result<Vec<u8>, Error> {
-        use self::ContentEncryptionAlgorithm::*;
+        use self::ContentEncryptionAlgorithm::{A128GCM, A192GCM, A256GCM};
 
         match self {
             A128GCM | A192GCM | A256GCM => self.aes_gcm_decrypt(encrypted, key),
@@ -678,7 +675,7 @@ impl ContentEncryptionAlgorithm {
 
     /// Generate a new random `EncryptionOptions` based on the algorithm
     pub(crate) fn random_encryption_options(self) -> Result<EncryptionOptions, Error> {
-        use self::ContentEncryptionAlgorithm::*;
+        use self::ContentEncryptionAlgorithm::{A128GCM, A192GCM, A256GCM};
         match self {
             A128GCM | A192GCM | A256GCM => Ok(EncryptionOptions::AES_GCM {
                 nonce: random_aes_gcm_nonce()?,
@@ -694,7 +691,7 @@ impl ContentEncryptionAlgorithm {
         key: &jwk::JWK<T>,
         options: &EncryptionOptions,
     ) -> Result<EncryptionResult, Error> {
-        use self::ContentEncryptionAlgorithm::*;
+        use self::ContentEncryptionAlgorithm::{A128GCM, A256GCM};
 
         let algorithm = match self {
             A128GCM => &aead::AES_128_GCM,
@@ -719,7 +716,7 @@ impl ContentEncryptionAlgorithm {
         encrypted: &EncryptionResult,
         key: &jwk::JWK<T>,
     ) -> Result<Vec<u8>, Error> {
-        use self::ContentEncryptionAlgorithm::*;
+        use self::ContentEncryptionAlgorithm::{A128GCM, A256GCM};
 
         let algorithm = match self {
             A128GCM => &aead::AES_128_GCM,
@@ -732,11 +729,8 @@ impl ContentEncryptionAlgorithm {
 
 /// Return a psuedo random number generator
 pub(crate) fn rng() -> &'static SystemRandom {
-    use std::ops::Deref;
-
     static RANDOM: Lazy<SystemRandom> = Lazy::new(SystemRandom::new);
-
-    RANDOM.deref()
+    &*RANDOM
 }
 
 /// Encrypt a payload with AES GCM
@@ -786,8 +780,8 @@ fn aes_gcm_decrypt<T: Serialize + DeserializeOwned>(
     let key = aead::UnboundKey::new(algorithm, key)?;
     let opening_key = aead::LessSafeKey::new(key);
 
-    let mut in_out = encrypted.encrypted.to_vec();
-    in_out.append(&mut encrypted.tag.to_vec());
+    let mut in_out = encrypted.encrypted.clone();
+    in_out.append(&mut encrypted.tag.clone());
 
     let nonce = aead::Nonce::try_assume_unique_for_key(&encrypted.nonce)?;
     let plaintext = opening_key.open_in_place(

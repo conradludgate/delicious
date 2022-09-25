@@ -89,7 +89,7 @@ impl Signable {
 
     /// Convenience function to build a SignedData from this Signable
     /// See [`SignedData::sign`]
-    pub fn sign(self, secret: Secret) -> Result<SignedData, Error> {
+    pub fn sign(self, secret: &Secret) -> Result<SignedData, Error> {
         SignedData::sign(self, secret)
     }
 
@@ -175,11 +175,11 @@ impl SignedData {
     /// let signed = SignedData::sign(data, secret)?;
     /// # Ok::<(), biscuit::errors::Error>(())
     /// ```
-    pub fn sign(data: Signable, secret: Secret) -> Result<Self, Error> {
+    pub fn sign(data: Signable, secret: &Secret) -> Result<Self, Error> {
         let signature = data
             .protected_header_registered
             .algorithm
-            .sign(&data.signing_input(), &secret)?;
+            .sign(&data.signing_input(), secret)?;
         Ok(Self {
             data,
             // secret,
@@ -230,12 +230,12 @@ impl SignedData {
     /// ```
     pub fn verify_flattened(
         data: &[u8],
-        secret: Secret,
+        secret: &Secret,
         algorithm: SignatureAlgorithm,
     ) -> Result<Self, Error> {
         let raw: FlattenedRaw = serde_json::from_slice(data)?;
         algorithm
-            .verify(&raw.signature, &raw.signing_input(), &secret)
+            .verify(&raw.signature, &raw.signing_input(), secret)
             .map_err(|_| ValidationError::InvalidSignature)?;
         let protected_header_registered: RegisteredHeader =
             serde_json::from_slice(&raw.protected_header)?;
@@ -367,14 +367,14 @@ mod tests {
                 }),
                 serde_json::to_vec(&expected_claims).unwrap(),
             )),
-            Secret::None,
+            &Secret::None,
         ));
         let token = expected_jwt.serialize_flattened();
         assert_eq!(expected_value, not_err!(serde_json::to_value(&token)));
 
         let biscuit: SignedData = not_err!(SignedData::verify_flattened(
             token.as_bytes(),
-            Secret::None,
+            &Secret::None,
             SignatureAlgorithm::None,
         ));
         let actual_claims: ClaimsSet<PrivateClaims> =
@@ -408,7 +408,7 @@ mod tests {
                 }),
                 serde_json::to_vec(&expected_claims).unwrap(),
             )),
-            Secret::Bytes("secret".to_string().into_bytes())
+            &Secret::Bytes("secret".to_string().into_bytes())
         ));
         let token = expected_jwt.serialize_flattened();
         assert_eq!(
@@ -418,7 +418,7 @@ mod tests {
 
         let biscuit = not_err!(SignedData::verify_flattened(
             token.as_bytes(),
-            Secret::Bytes("secret".to_string().into_bytes()),
+            &Secret::Bytes("secret".to_string().into_bytes()),
             SignatureAlgorithm::HS256
         ));
         assert_eq!(
@@ -470,7 +470,7 @@ mod tests {
                 }),
                 serde_json::to_vec(&expected_claims).unwrap(),
             )),
-            private_key,
+            &private_key,
         ));
         let token = expected_jwt.serialize_flattened();
         assert_eq!(expected_value, not_err!(serde_json::to_value(&token)));
@@ -478,7 +478,7 @@ mod tests {
         let public_key = Secret::public_key_from_file("test/fixtures/rsa_public_key.der").unwrap();
         let biscuit = not_err!(SignedData::verify_flattened(
             token.as_bytes(),
-            public_key,
+            &public_key,
             SignatureAlgorithm::RS256,
         ));
         assert_eq!(
@@ -504,7 +504,7 @@ mod tests {
 
         let token = not_err!(SignedData::verify_flattened(
             jwt.as_bytes(),
-            signing_secret,
+            &signing_secret,
             SignatureAlgorithm::ES256
         ));
         let jwt_val: super::FlattenedRaw = not_err!(serde_json::from_str(jwt));
@@ -551,12 +551,12 @@ mod tests {
                 header.clone(),
                 serde_json::to_vec(&expected_claims).unwrap(),
             )),
-            Secret::Bytes("secret".to_string().into_bytes())
+            &Secret::Bytes("secret".to_string().into_bytes())
         ));
         let token = expected_jwt.serialize_flattened();
         let biscuit = not_err!(SignedData::verify_flattened(
             token.as_bytes(),
-            Secret::Bytes("secret".to_string().into_bytes()),
+            &Secret::Bytes("secret".to_string().into_bytes()),
             SignatureAlgorithm::HS256,
         ));
         assert_eq!(
@@ -575,7 +575,7 @@ mod tests {
              \"payload\":\"eyJzdWIiOiJiQGIuY29tIiwiY29tcGFueSI6IkFDTUUifQ\",\
              \"signature\":\"pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI\"}"
                 .as_bytes(),
-            Secret::Bytes("secret".to_string().into_bytes()),
+            &Secret::Bytes("secret".to_string().into_bytes()),
             SignatureAlgorithm::HS256,
         );
         let _ = claims.unwrap();
@@ -590,7 +590,7 @@ mod tests {
              \"payload\":\"eyJzdWIiOiJiQGIuY29tIiwiY29tcGFueSI6IkFDTUUifQ\",\
              \"signature\":\"pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI\"}"
                 .as_bytes(),
-            public_key,
+            &public_key,
             SignatureAlgorithm::RS256,
         );
         let _ = claims.unwrap();
@@ -604,7 +604,7 @@ mod tests {
              \"payload\":\"eyJzdWIiOiJiQGIuY29tIiwiY29tcGFueSI6IkFDTUUifQ\",\
              \"signature\":\"pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI\"}"
                 .as_bytes(),
-            Secret::Bytes("secret".to_string().into_bytes()),
+            &Secret::Bytes("secret".to_string().into_bytes()),
             SignatureAlgorithm::HS256,
         );
         let _ = claims.unwrap();
@@ -615,7 +615,7 @@ mod tests {
     fn flattened_jws_verify_reject_multiple_signatures() {
         let _ = SignedData::verify_flattened(
             br#"{"signatures": [], "protected": "", "payload": "", "signature: ""}"#,
-            Secret::None,
+            &Secret::None,
             SignatureAlgorithm::None,
         )
         .unwrap();
@@ -626,7 +626,7 @@ mod tests {
     fn flattened_jws_verify_reject_unprotected_headers() {
         let _ = SignedData::verify_flattened(
             br#"{"header": "", "protected": "", "payload": "", "signature: ""}"#,
-            Secret::None,
+            &Secret::None,
             SignatureAlgorithm::None,
         )
         .unwrap();

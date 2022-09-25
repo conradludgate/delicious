@@ -289,7 +289,7 @@ pub type JWT<T, H> = jws::Decoded<ClaimsSet<T>, H>;
 /// nonce_counter = nonce_counter + 1u8;
 /// # }
 /// ```
-pub type JWE<T, H, I> = jwe::Decrypted<JWT<T, H>, I>;
+pub type JWE<I> = jwe::Decrypted<Compact, I>;
 
 /// An empty struct that derives Serialize and Deserialize. Can be used, for example, in places where a type
 /// for custom values (such as private claims in a `ClaimsSet`) is required but you have nothing to implement.
@@ -326,68 +326,6 @@ pub type JWE<T, H, I> = jwe::Decrypted<JWT<T, H>, I>;
 /// ```
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct Empty {}
-
-// impl CompactJson for Empty {}
-
-// /// A "part" of the compact representation of JWT/JWS/JWE. Parts are first serialized to some form and then
-// /// base64 encoded and separated by periods.
-// ///
-// /// An automatic implementation for any `T` that implements the marker trait `CompactJson` is provided.
-// /// This implementation will serialize/deserialize `T` to JSON via serde.
-// pub trait CompactPart {
-//     /// Convert this part into bytes
-//     fn to_bytes(&self) -> Result<Vec<u8>, Error>;
-
-//     /// Convert a sequence of bytes into Self
-//     fn from_bytes(bytes: &[u8]) -> Result<Self, Error>
-//     where
-//         Self: Sized;
-
-//     /// Base64 decode into Self
-//     fn from_base64<B: AsRef<[u8]>>(encoded: &B) -> Result<Self, Error>
-//     where
-//         Self: Sized,
-//     {
-//         let decoded = BASE64URL_NOPAD.decode(encoded.as_ref())?;
-//         Self::from_bytes(&decoded)
-//     }
-
-//     /// Serialize `Self` to some form and then base64URL Encode
-//     fn to_base64(&self) -> Result<Base64Url, Error> {
-//         let bytes = self.to_bytes()?;
-//         Ok(Base64Url(BASE64URL_NOPAD.encode(bytes.as_ref())))
-//     }
-// }
-
-// /// A marker trait that indicates that the object is to be serialized to JSON and deserialized from JSON.
-// /// This is primarily used in conjunction with the `CompactPart` trait which will serialize structs to JSON before
-// /// base64 encoding, and vice-versa.
-// pub trait CompactJson: Serialize + DeserializeOwned {}
-
-// impl<T> CompactPart for T
-// where
-//     T: CompactJson,
-// {
-//     /// JSON serialize the part and return the JSON string bytes
-//     fn to_bytes(&self) -> Result<Vec<u8>, Error> {
-//         Ok(serde_json::to_vec(&self)?)
-//     }
-
-//     fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-//         Ok(serde_json::from_slice(bytes)?)
-//     }
-// }
-
-// impl CompactPart for Vec<u8> {
-//     fn to_bytes(&self) -> Result<Vec<u8>, Error> {
-//         Ok(self.clone())
-//     }
-
-//     /// Convert a sequence of bytes into Self
-//     fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-//         Ok(bytes.to_vec())
-//     }
-// }
 
 /// A collection of `CompactPart`s that have been converted to `Base64Url`
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -452,7 +390,7 @@ impl Compact {
         if !source.is_empty() {
             source.push('.');
             for (i, _) in source.match_indices('.') {
-                indices.push(i)
+                indices.push(i);
             }
         }
 
@@ -483,6 +421,22 @@ impl Compact {
     /// Convenience function to retrieve a part at a certain index and decode into the type desired
     pub fn deser_part<T: DeserializeOwned>(&self, index: usize) -> Result<T, Error> {
         Ok(serde_json::from_slice(&self.part_decoded(index)?)?)
+    }
+
+    pub(crate) fn parse_triple(&self) -> Result<(&str, Vec<u8>), Error> {
+        match self.indices.as_slice() {
+            [_, x, y] => {
+                let decode =
+                    base64::decode_config(&self.source[x + 1..*y], base64::URL_SAFE_NO_PAD)?;
+                Ok((&self.source[..*x], decode))
+            }
+            _ => Err(Error::DecodeError(
+                crate::errors::DecodeError::PartsLengthError {
+                    actual: self.len(),
+                    expected: 3,
+                },
+            )),
+        }
     }
 }
 
@@ -587,10 +541,10 @@ where
     T: Clone + Debug + Eq + PartialEq + Serialize + DeserializeOwned + Send + Sync,
 {
     /// Checks whether this enum, regardless of single or multiple value contains `value`.
-    pub fn contains<Q: ?Sized>(&self, value: &Q) -> bool
+    pub fn contains<Q>(&self, value: &Q) -> bool
     where
         T: Borrow<Q>,
-        Q: PartialEq,
+        Q: ?Sized + PartialEq,
     {
         match *self {
             SingleOrMultiple::Single(ref single) => single.borrow() == value,
@@ -713,9 +667,9 @@ pub struct ClaimPresenceOptions {
 }
 
 impl ClaimPresenceOptions {
-    /// Returns a ClaimPresenceOptions where every claim is required as per [RFC7523](https://tools.ietf.org/html/rfc7523#section-3)
+    /// Returns a `ClaimPresenceOptions` where every claim is required as per [RFC7523](https://tools.ietf.org/html/rfc7523#section-3)
     pub fn strict() -> Self {
-        use crate::Presence::*;
+        use crate::Presence::Required;
         ClaimPresenceOptions {
             issued_at: Required,
             not_before: Required,
@@ -824,7 +778,7 @@ impl RegisteredClaims {
             Ok(())
         } else {
             Err(ValidationError::MissingRequiredClaims(
-                missing_claims.into_iter().map(|v| v.into()).collect(),
+                missing_claims.into_iter().map(Into::into).collect(),
             ))
         }
     }
@@ -898,13 +852,13 @@ impl RegisteredClaims {
             Validation::Ignored => Ok(()),
             Validation::Validate(expected_aud) => match self.audience {
                 Some(SingleOrMultiple::Single(ref audience)) if audience != &expected_aud => Err(
-                    ValidationError::InvalidAudience(self.audience.clone().unwrap()),
+                    ValidationError::InvalidAudience(SingleOrMultiple::Single(audience.clone())),
                 ),
                 Some(SingleOrMultiple::Multiple(ref audiences))
                     if !audiences.contains(&expected_aud) =>
                 {
                     Err(ValidationError::InvalidAudience(
-                        self.audience.clone().unwrap(),
+                        SingleOrMultiple::Multiple(audiences.clone()),
                     ))
                 }
                 _ => Ok(()),
@@ -918,7 +872,7 @@ impl RegisteredClaims {
             Validation::Ignored => Ok(()),
             Validation::Validate(expected_issuer) => match self.issuer {
                 Some(ref iss) if iss != &expected_issuer => {
-                    Err(ValidationError::InvalidIssuer(self.issuer.clone().unwrap()))
+                    Err(ValidationError::InvalidIssuer(iss.clone()))
                 }
                 _ => Ok(()),
             },

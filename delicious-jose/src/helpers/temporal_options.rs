@@ -1,4 +1,4 @@
-use time::{OffsetDateTime, Duration};
+use time::{Duration, OffsetDateTime};
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 /// Options for validating temporal claims

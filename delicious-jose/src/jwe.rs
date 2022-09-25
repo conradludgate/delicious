@@ -224,94 +224,6 @@ impl From<RegisteredHeader> for Header<Empty> {
     }
 }
 
-// /// Compact representation of a JWE, or an encrypted JWT
-// ///
-// /// This representation contains a payload of type `T` with custom headers provided by type `H`.
-// /// In general you should use a JWE with a JWS. That is, you should sign your JSON Web Token to
-// /// create a JWS, and then encrypt the signed JWS.
-// ///
-// /// # Nonce/Initialization Vectors for AES GCM encryption
-// ///
-// /// When encrypting tokens with AES GCM, you must take care _not to reuse_ the nonce for the same
-// /// key. You can keep track of this by simply treating the nonce as a 96 bit counter and
-// /// incrementing it every time you encrypt something new.
-// ///
-// /// # Examples
-// /// ## Encrypting a JWS/JWT
-// /// See the example code in the [`biscuit::JWE`](../type.JWE.html) type alias.
-// ///
-// /// ## Encrypting a string payload with A256GCMKW and A256GCM
-// /// ```
-// /// use std::str;
-// /// use biscuit::Empty;
-// /// use biscuit::jwk::JWK;
-// /// use biscuit::jwe;
-// /// use biscuit::jwa::{EncryptionOptions, KeyManagementAlgorithm, ContentEncryptionAlgorithm};
-// ///
-// /// # #[allow(unused_assignments)]
-// /// # fn main() {
-// /// let payload = "The true sign of intelligence is not knowledge but imagination.";
-// /// // You would usually have your own AES key for this, but we will use a zeroed key as an example
-// /// let key: JWK<Empty> = JWK::new_octet_key(&vec![0; 256 / 8], Default::default());
-// ///
-// /// // Construct the JWE
-// /// let jwe = jwe::Decrypted::new(
-// ///     From::from(jwe::RegisteredHeader {
-// ///         cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
-// ///         enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
-// ///         ..Default::default()
-// ///     }),
-// ///     payload.as_bytes().to_vec(),
-// /// );
-// ///
-// /// // We need to create an `EncryptionOptions` with a nonce for AES GCM encryption.
-// /// // You must take care NOT to reuse the nonce. You can simply treat the nonce as a 96 bit
-// /// // counter that is incremented after every use
-// /// let mut nonce_counter = num_bigint::BigUint::from_bytes_le(&vec![0; 96 / 8]);
-// /// // Make sure it's no more than 96 bits!
-// /// assert!(nonce_counter.bits() <= 96);
-// /// let mut nonce_bytes = nonce_counter.to_bytes_le();
-// /// // We need to ensure it is exactly 96 bits
-// /// nonce_bytes.resize(96/8, 0);
-// /// let options = EncryptionOptions::AES_GCM { nonce: nonce_bytes };
-// ///
-// /// // Encrypt
-// /// let encrypted_jwe = jwe.encrypt(&key, &options).unwrap();
-// ///
-// /// // Decrypt
-// /// let decrypted_jwe = encrypted_jwe
-// ///     .decrypt(
-// ///         &key,
-// ///         KeyManagementAlgorithm::A256GCMKW,
-// ///         ContentEncryptionAlgorithm::A256GCM,
-// ///     )
-// ///     .unwrap();
-// ///
-// /// let decrypted_payload: &Vec<u8> = decrypted_jwe.payload().unwrap();
-// /// let decrypted_str = str::from_utf8(&*decrypted_payload).unwrap();
-// /// assert_eq!(decrypted_str, payload);
-// ///
-// /// // Don't forget to increment the nonce!
-// /// nonce_counter = nonce_counter + 1u8;
-// /// # }
-// /// ```
-// #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-// #[serde(untagged)]
-// pub enum Compact<T, H> {
-//     /// Decrypted form of the JWE.
-//     /// This variant cannot be serialized or deserialized and will return an error.
-//     #[serde(skip_serializing)]
-//     #[serde(skip_deserializing)]
-//     Decrypted {
-//         /// Embedded header
-//         header: Header<H>,
-//         /// Payload, usually a signed/unsigned JWT
-//         payload: T,
-//     },
-//     /// Encrypted JWT. Use this form to send to your clients
-//     Encrypted(crate::Compact),
-// }
-
 /// Rust representation of a JWE
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Decrypted<T, H> {
@@ -330,32 +242,6 @@ where
     pub fn new(header: Header<H>, payload: T) -> Self {
         Self { header, payload }
     }
-
-    // /// Create a new encrypted JWE
-    // pub fn new_encrypted(token: &str) -> Self {
-    //     Compact::Encrypted(crate::Compact::decode(&token.to_owned()))
-    // }
-
-    // /// Consumes self and encrypt it. If the token is already encrypted, this is a no-op.
-    // ///
-    // /// You will need to provide a `jwa::EncryptionOptions` that will differ based on your chosen
-    // /// algorithms.
-    // ///
-    // /// If your `cek_algorithm` is not `dir` or direct, the options provided will be used to
-    // /// encrypt your content encryption key.
-    // ///
-    // /// If your `cek_algorithm` is `dir` or Direct, then the options will be used to encrypt
-    // /// your content directly.
-    // pub fn into_encrypted<K: Serialize + DeserializeOwned>(
-    //     self,
-    //     key: &jwk::JWK<K>,
-    //     options: &EncryptionOptions,
-    // ) -> Result<Self, Error> {
-    //     match self {
-    //         Compact::Encrypted(_) => Ok(self),
-    //         Compact::Decrypted { .. } => self.encrypt(key, options),
-    //     }
-    // }
 
     /// Encrypt an Decrypted JWE.
     ///
@@ -413,7 +299,7 @@ where
         // Step 11 involves compressing the payload, which we do not support at the moment
         let payload = serde_json::to_vec(&self.payload)?;
         if header.registered.compression_algorithm.is_some() {
-            Err(Error::UnsupportedOperation)?
+            Err(Error::UnsupportedOperation)?;
         }
 
         // Steps 12 to 14 involves the calculation of `Additional Authenticated Data` for encryption. In
@@ -439,20 +325,6 @@ where
         Ok(compact)
     }
 
-    // /// Consumes self and decrypt it. If the token is already decrypted,
-    // /// this is a no-op.
-    // pub fn into_decrypted<K: Serialize + DeserializeOwned>(
-    //     self,
-    //     key: &jwk::JWK<K>,
-    //     cek_alg: KeyManagementAlgorithm,
-    //     enc_alg: ContentEncryptionAlgorithm,
-    // ) -> Result<Self, Error> {
-    //     match self {
-    //         Compact::Encrypted(_) => self.decrypt(key, cek_alg, enc_alg),
-    //         Compact::Decrypted { .. } => Ok(self),
-    //     }
-    // }
-
     /// Decrypt an encrypted JWE. Provide the expected algorithms to mitigate an attacker modifying the
     /// fields
     pub fn decrypt<K: Serialize + DeserializeOwned>(
@@ -465,7 +337,7 @@ where
             Err(DecodeError::PartsLengthError {
                 actual: encrypted.len(),
                 expected: 5,
-            })?
+            })?;
         }
         // RFC 7516 Section 5.2 describes the steps involved in decryption.
         // Steps 1-3
@@ -516,78 +388,6 @@ where
 
         Ok(Self::new(header, payload))
     }
-
-    // /// Convenience method to get a reference to the encrypted payload
-    // pub fn encrypted(&self) -> Result<&crate::Compact, Error> {
-    //     match *self {
-    //         Compact::Decrypted { .. } => Err(Error::UnsupportedOperation),
-    //         Compact::Encrypted(ref encoded) => Ok(encoded),
-    //     }
-    // }
-
-    // /// Convenience method to get a mutable reference to the encrypted payload
-    // pub fn encrypted_mut(&mut self) -> Result<&mut crate::Compact, Error> {
-    //     match *self {
-    //         Compact::Decrypted { .. } => Err(Error::UnsupportedOperation),
-    //         Compact::Encrypted(ref mut encoded) => Ok(encoded),
-    //     }
-    // }
-
-    // /// Convenience method to get a reference to the payload from an Decrypted JWE
-    // pub fn payload(&self) -> Result<&T, Error> {
-    //     match *self {
-    //         Compact::Decrypted { ref payload, .. } => Ok(payload),
-    //         Compact::Encrypted(_) => Err(Error::UnsupportedOperation),
-    //     }
-    // }
-
-    // /// Convenience method to get a mutable reference to the payload from an Decrypted JWE
-    // pub fn payload_mut(&mut self) -> Result<&mut T, Error> {
-    //     match *self {
-    //         Compact::Decrypted {
-    //             ref mut payload, ..
-    //         } => Ok(payload),
-    //         Compact::Encrypted(_) => Err(Error::UnsupportedOperation),
-    //     }
-    // }
-
-    // /// Convenience method to get a reference to the header from an Decrypted JWE
-    // pub fn header(&self) -> Result<&Header<H>, Error> {
-    //     match *self {
-    //         Compact::Decrypted { ref header, .. } => Ok(header),
-    //         Compact::Encrypted(_) => Err(Error::UnsupportedOperation),
-    //     }
-    // }
-
-    // /// Convenience method to get a reference to the header from an Decrypted JWE
-    // pub fn header_mut(&mut self) -> Result<&mut Header<H>, Error> {
-    //     match *self {
-    //         Compact::Decrypted { ref mut header, .. } => Ok(header),
-    //         Compact::Encrypted(_) => Err(Error::UnsupportedOperation),
-    //     }
-    // }
-
-    // /// Consumes self, and move the payload and header out and return them as a tuple
-    // ///
-    // /// # Panics
-    // /// Panics if the JWE is not decrypted
-    // pub fn unwrap_decrypted(self) -> (Header<H>, T) {
-    //     match self {
-    //         Compact::Decrypted { header, payload } => (header, payload),
-    //         Compact::Encrypted(_) => panic!("JWE is encrypted"),
-    //     }
-    // }
-
-    // /// Consumes self, and move the encrypted Compact serialization out and return it
-    // ///
-    // /// # Panics
-    // /// Panics if the JWE is not encrypted
-    // pub fn unwrap_encrypted(self) -> crate::Compact {
-    //     match self {
-    //         Compact::Decrypted { .. } => panic!("JWE is decrypted"),
-    //         Compact::Encrypted(compact) => compact,
-    //     }
-    // }
 }
 
 /// Convenience implementation for a Compact that contains a `ClaimsSet`

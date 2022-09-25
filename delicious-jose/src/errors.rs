@@ -1,7 +1,7 @@
 //! Errors returned will be converted to one of the structs in this module.
 use crate::SingleOrMultiple;
-use time::Duration;
 use std::{error, fmt, io, str, string};
+use time::Duration;
 
 #[derive(Debug)]
 /// All the errors we can encounter while signing/verifying tokens
@@ -144,12 +144,8 @@ impl fmt::Display for Error {
             WrongKeyType {
                 ref actual,
                 ref expected,
-            } => write!(
-                f,
-                "{} was expected for this cryptographic operation but {} was provided",
-                expected, actual
-            ),
-            WrongEncryptionOptions {
+            }
+            | WrongEncryptionOptions {
                 ref actual,
                 ref expected,
             } => write!(

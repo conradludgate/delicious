@@ -1,25 +1,25 @@
 #![no_main]
 #[macro_use]
 extern crate libfuzzer_sys;
-extern crate biscuit;
+extern crate delicious_jose;
 extern crate serde_json;
 
-use biscuit::{Empty, JWE};
-use biscuit::jwk::JWK;
-use biscuit::jwa::{KeyManagementAlgorithm, ContentEncryptionAlgorithm};
+use delicious_jose::jwa::{ContentEncryptionAlgorithm, KeyManagementAlgorithm};
+use delicious_jose::jwk::JWK;
+use delicious_jose::{Compact, Empty, JWE};
 
 fuzz_target!(|data: &[u8]| {
     let key: JWK<Empty> = JWK::new_octet_key(&vec![0; 256 / 8], Default::default());
 
-    let token = std::str::from_utf8(data);
-    if token.is_err() {
-        return;
-    }
-    let token = token.unwrap();
+    let token = match std::str::from_utf8(data) {
+        Ok(t) => t,
+        Err(_) => return,
+    };
 
-    let token: JWE<serde_json::Value, biscuit::Empty, biscuit::Empty> = JWE::new_encrypted(&token);
+    let token = Compact::decode(token);
 
-    let _ = token.into_decrypted(
+    let _ = JWE::<delicious_jose::Empty>::decrypt(
+        &token,
         &key,
         KeyManagementAlgorithm::A256GCMKW,
         ContentEncryptionAlgorithm::A256GCM,

@@ -1,39 +1,11 @@
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use crate::errors::{DecodeError, Error, ValidationError};
+use crate::errors::{Error, ValidationError};
 use crate::jwa::{Algorithm, SignatureAlgorithm};
 use crate::jwk::{AlgorithmParameters, JWKSet};
 
 use super::{Header, Secret};
-
-// /// Compact representation of a JWS
-// ///
-// /// This representation contains a payload (type `T`) (e.g. a claims set) and is (optionally) signed. This is the
-// /// most common form of tokens used. The JWS can contain additional header fields provided by type `H`.
-// ///
-// /// Serialization/deserialization is handled by serde. Before you transport the token, make sure you
-// /// turn it into the encoded form first.
-// ///
-// /// # Examples
-// /// ## Signing and verifying a JWT with HS256
-// /// See an example in the [`biscuit::JWT`](../type.JWT.html) type alias.
-// #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-// #[serde(untagged)]
-// pub enum Compact<T, H> {
-//     /// Decoded form of the JWS.
-//     /// This variant cannot be serialized or deserialized and will return an error.
-//     #[serde(skip_serializing)]
-//     #[serde(skip_deserializing)]
-//     Decoded {
-//         /// Embedded header
-//         header: Header<H>,
-//         /// Payload, usually a claims set
-//         payload: T,
-//     },
-//     /// Encoded and (optionally) signed JWT. Use this form to send to your clients
-//     Encoded(crate::Compact),
-// }
 
 /// Rust representation of a JWS
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -54,21 +26,6 @@ where
         Self { header, payload }
     }
 
-    // /// New encoded JWT
-    // pub fn new_encoded(token: &str) -> Self {
-    //     Compact::Encoded(crate::Compact::decode(&token.to_owned()))
-    // }
-
-    // /// Consumes self and convert into encoded form. If the token is already encoded,
-    // /// this is a no-op.
-    // // TODO: Is the no-op dangerous? What if the secret between the previous encode and this time is different?
-    // pub fn encode(self, secret: &Secret) -> Result<Self, Error> {
-    //     match self {
-    //         Compact::Encoded(_) => Ok(self),
-    //         Compact::Decoded { .. } => self.encode(secret),
-    //     }
-    // }
-
     /// Encode the JWT passed and sign the payload using the algorithm from the header and the secret
     /// The secret is dependent on the signing algorithm
     pub fn encode(&self, secret: &Secret) -> Result<crate::Compact, Error> {
@@ -85,20 +42,6 @@ where
         Ok(compact)
     }
 
-    // /// Consumes self and convert into decoded form, verifying the signature, if any.
-    // /// If the token is already decoded, this is a no-op
-    // // TODO: Is the no-op dangerous? What if the secret between the previous decode and this time is different?
-    // pub fn into_decoded(
-    //     self,
-    //     secret: &Secret,
-    //     algorithm: SignatureAlgorithm,
-    // ) -> Result<Self, Error> {
-    //     match self {
-    //         Compact::Encoded(_) => self.decode(secret, algorithm),
-    //         Compact::Decoded { .. } => Ok(self),
-    //     }
-    // }
-
     /// Decode a token into the JWT struct and verify its signature using the concrete Secret
     /// If the token or its signature is invalid, it will return an error
     pub fn decode(
@@ -106,16 +49,7 @@ where
         secret: &Secret,
         algorithm: SignatureAlgorithm,
     ) -> Result<Self, Error> {
-        if encoded.len() != 3 {
-            Err(DecodeError::PartsLengthError {
-                actual: encoded.len(),
-                expected: 3,
-            })?
-        }
-
-        let signature = encoded.part_decoded(2)?;
-        let payload = encoded.as_str().rsplit_once('.').unwrap().0;
-
+        let (payload, signature) = encoded.parse_triple()?;
         algorithm
             .verify(signature.as_ref(), payload.as_ref(), secret)
             .map_err(|_| ValidationError::InvalidSignature)?;
@@ -143,16 +77,7 @@ where
         jwks: &JWKSet<J>,
         expected_algorithm: Option<SignatureAlgorithm>,
     ) -> Result<Self, Error> {
-        if encoded.len() != 3 {
-            Err(DecodeError::PartsLengthError {
-                actual: encoded.len(),
-                expected: 3,
-            })?
-        }
-
-        let signature = encoded.part_decoded(2)?;
-        let payload = encoded.as_str().rsplit_once('.').unwrap().0;
-
+        let (payload, signature) = encoded.parse_triple()?;
         let header: Header<H> = encoded.deser_part(0)?;
         let key_id = header
             .registered
@@ -205,108 +130,6 @@ where
 
         Ok(Self::new(header, decoded_claims))
     }
-
-    // /// Convenience method to get a reference to the encoded string from an encoded compact JWS
-    // pub fn encoded(&self) -> Result<&crate::Compact, Error> {
-    //     match *self {
-    //         Compact::Decoded { .. } => Err(Error::UnsupportedOperation),
-    //         Compact::Encoded(ref encoded) => Ok(encoded),
-    //     }
-    // }
-
-    // /// Convenience method to get a mutable reference to the encoded string from an encoded compact JWS
-    // pub fn encoded_mut(&mut self) -> Result<&mut crate::Compact, Error> {
-    //     match *self {
-    //         Compact::Decoded { .. } => Err(Error::UnsupportedOperation),
-    //         Compact::Encoded(ref mut encoded) => Ok(encoded),
-    //     }
-    // }
-
-    // /// Convenience method to get a reference to the claims set from a decoded compact JWS
-    // pub fn payload(&self) -> Result<&T, Error> {
-    //     match *self {
-    //         Compact::Decoded { ref payload, .. } => Ok(payload),
-    //         Compact::Encoded(_) => Err(Error::UnsupportedOperation),
-    //     }
-    // }
-
-    // /// Convenience method to get a reference to the claims set from a decoded compact JWS
-    // pub fn payload_mut(&mut self) -> Result<&mut T, Error> {
-    //     match *self {
-    //         Compact::Decoded {
-    //             ref mut payload, ..
-    //         } => Ok(payload),
-    //         Compact::Encoded(_) => Err(Error::UnsupportedOperation),
-    //     }
-    // }
-
-    // /// Convenience method to get a reference to the header from a decoded compact JWS
-    // pub fn header(&self) -> Result<&Header<H>, Error> {
-    //     match *self {
-    //         Compact::Decoded { ref header, .. } => Ok(header),
-    //         Compact::Encoded(_) => Err(Error::UnsupportedOperation),
-    //     }
-    // }
-
-    // /// Convenience method to get a reference to the header from a decoded compact JWS
-    // pub fn header_mut(&mut self) -> Result<&mut Header<H>, Error> {
-    //     match *self {
-    //         Compact::Decoded { ref mut header, .. } => Ok(header),
-    //         Compact::Encoded(_) => Err(Error::UnsupportedOperation),
-    //     }
-    // }
-
-    // /// Consumes self, and move the payload and header out and return them as a tuple
-    // ///
-    // /// # Panics
-    // /// Panics if the JWS is not decoded
-    // pub fn unwrap_decoded(self) -> (Header<H>, T) {
-    //     match self {
-    //         Compact::Decoded { header, payload } => (header, payload),
-    //         Compact::Encoded(_) => panic!("JWS is encoded"),
-    //     }
-    // }
-
-    // /// Consumes self, and move the encoded Compact out and return it
-    // ///
-    // /// # Panics
-    // /// Panics if the JWS is not encoded
-    // pub fn unwrap_encoded(self) -> crate::Compact {
-    //     match self {
-    //         Compact::Decoded { .. } => panic!("JWS is decoded"),
-    //         Compact::Encoded(encoded) => encoded,
-    //     }
-    // }
-
-    // /// Without decoding and verifying the JWS, retrieve a copy of the header.
-    // ///
-    // /// ## Warning
-    // /// Use this at your own risk. It is not advisable to trust unverified content.
-    // pub fn unverified_header(&self) -> Result<Header<H>, Error> {
-    //     match *self {
-    //         Compact::Decoded { .. } => Err(Error::UnsupportedOperation),
-    //         Compact::Encoded(ref compact) => compact.deser_part(0),
-    //     }
-    // }
-
-    // /// Without decoding and verifying the JWS, retrieve a copy of the payload.
-    // ///
-    // /// ## Warning
-    // /// Use this at your own risk. It is not advisable to trust unverified content.
-    // pub fn unverified_payload(&self) -> Result<T, Error> {
-    //     match *self {
-    //         Compact::Decoded { .. } => Err(Error::UnsupportedOperation),
-    //         Compact::Encoded(ref compact) => compact.deser_part(1),
-    //     }
-    // }
-
-    // /// Get a copy of the signature
-    // pub fn signature(&self) -> Result<Vec<u8>, Error> {
-    //     match *self {
-    //         Compact::Decoded { .. } => Err(Error::UnsupportedOperation),
-    //         Compact::Encoded(ref compact) => compact.part_decoded(2),
-    //     }
-    // }
 }
 
 /// Convenience implementation for a Compact that contains a `ClaimsSet`
@@ -326,20 +149,6 @@ where
         Ok(())
     }
 }
-
-// /// Implementation for embedded inside a JWE.
-// // FIXME: Maybe use a separate trait instead?
-// impl<T: CompactPart, H: Serialize + DeserializeOwned> CompactPart for Compact<T, H> {
-//     fn to_bytes(&self) -> Result<Vec<u8>, Error> {
-//         let encoded = self.encoded()?;
-//         Ok(encoded.to_string().into_bytes())
-//     }
-
-//     fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-//         let string = str::from_utf8(bytes)?;
-//         Ok(Self::new_encoded(string))
-//     }
-// }
 
 #[cfg(test)]
 mod tests {

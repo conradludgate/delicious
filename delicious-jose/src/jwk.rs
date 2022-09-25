@@ -676,7 +676,7 @@ impl<T> JWKSet<T> {
     pub fn find(&self, kid: &str) -> Option<&JWK<T>> {
         self.keys
             .iter()
-            .find(|jwk| jwk.common.key_id.is_some() && jwk.common.key_id.as_ref().unwrap() == kid)
+            .find(|jwk| jwk.common.key_id.as_deref() == Some(kid))
     }
 }
 

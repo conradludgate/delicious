@@ -1,7 +1,7 @@
 //! Secure cryptographic digests
 //!
 //! Currently used by JWK thumbprints.
-//! This simply wraps the ring::digest module, while providing forward compatibility
+//! This simply wraps the `ring::digest` module, while providing forward compatibility
 //! should the implementation change.
 
 /// A digest algorithm
