@@ -291,7 +291,7 @@ pub type JWT<T, H> = jws::Decoded<ClaimsSet<T>, H>;
 /// nonce_counter = nonce_counter + 1u8;
 /// # }
 /// ```
-pub type JWE<T, H, I> = jwe::Compact<JWT<T, H>, I>;
+pub type JWE<T, H, I> = jwe::Decrypted<JWT<T, H>, I>;
 
 /// An empty struct that derives Serialize and Deserialize. Can be used, for example, in places where a type
 /// for custom values (such as private claims in a `ClaimsSet`) is required but you have nothing to implement.
