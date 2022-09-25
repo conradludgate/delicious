@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use tokio::sync::{OnceCell, RwLock, RwLockReadGuard};
-use tokio_postgres::{types::Type, Config, Error, NoTls, Row, Statement};
+use tokio_postgres::{types::Type, Config, Error, NoTls, Row, Statement, RowStream};
 
 /// Postgres client wrapper that monitors the connection and will reconnect on failure.
 #[derive(Debug, Clone)]
@@ -63,6 +63,8 @@ impl DbReconnector {
 pub struct Client {
     inner: tokio_postgres::Client,
     get_website: OnceCell<Statement>,
+    get_all_websites: OnceCell<Statement>,
+    get_user_websites: OnceCell<Statement>,
 }
 
 impl std::fmt::Debug for Client {
@@ -78,15 +80,49 @@ impl Client {
         Client {
             inner: c,
             get_website: OnceCell::new(),
+            get_all_websites: OnceCell::new(),
+            get_user_websites: OnceCell::new(),
         }
     }
 
     pub async fn get_website(&self, id: i32) -> Result<Row, Error> {
-        static QUERY: &str = "SELECT website_id, website_uuid, user_id, name, domain, share_id, created_at FROM website WHERE website_id = $1";
+        static QUERY: &str = "SELECT
+            website_id, website_uuid, user_id, name, domain, share_id, created_at
+        FROM website
+        WHERE website_id = $1";
         let stmt = self
             .get_website
             .get_or_try_init(|| self.inner.prepare_typed(QUERY, &[Type::INT4]))
             .await?;
         self.inner.query_one(stmt, &[&id]).await
+    }
+
+    pub async fn get_all_websites(&self) -> Result<RowStream, Error> {
+        static QUERY: &str = "SELECT
+            website_id, website_uuid, website.user_id, name, domain, share_id, website.created_at,
+            account.username as account
+        FROM website
+        INNER JOIN account on account.user_id=website.user_id
+        ORDER BY
+            user_id ASC,
+            name ASC";
+        let stmt = self
+            .get_all_websites
+            .get_or_try_init(|| self.inner.prepare_typed(QUERY, &[]))
+            .await?;
+        self.inner.query_raw(stmt, [&0; 0]).await
+    }
+
+    pub async fn get_user_websites(&self, user_id: i32) -> Result<RowStream, Error> {
+        static QUERY: &str = "SELECT 
+            website_id, website_uuid, user_id, name, domain, share_id, created_at
+        FROM website 
+        WHERE user_id = $1 
+        ORDER BY name ASC";
+        let stmt = self
+            .get_user_websites
+            .get_or_try_init(|| self.inner.prepare_typed(QUERY, &[Type::INT4]))
+            .await?;
+        self.inner.query_raw(stmt, [&user_id]).await
     }
 }
