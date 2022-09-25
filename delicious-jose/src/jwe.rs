@@ -623,7 +623,6 @@ mod tests {
     use crate::jwa::{self, random_aes_gcm_nonce, rng};
     use crate::jws;
     use crate::test::assert_serde_json;
-    use crate::JWE;
 
     fn cek_oct_key(len: usize) -> jwk::JWK<Empty> {
         // Construct the encryption key
@@ -850,15 +849,14 @@ mod tests {
             },
             private: Default::default(),
         };
-        let jws = jws::Compact::new_decoded(
+        let jws = jws::Decoded::new(
             From::from(jws::RegisteredHeader {
                 algorithm: jwa::SignatureAlgorithm::HS256,
                 ..Default::default()
             }),
             claims,
         );
-        let jws =
-            not_err!(jws.into_encoded(&jws::Secret::Bytes("secret".to_string().into_bytes())));
+        let jws = not_err!(jws.encode(&jws::Secret::Bytes("secret".to_string().into_bytes())));
 
         // Construct the encryption key
         let key = cek_oct_key(256 / 8);
@@ -895,8 +893,8 @@ mod tests {
 
         // Serde test
         let json = not_err!(serde_json::to_string(&encrypted_jwe));
-        let deserialized_json: JWE<Empty, Empty, Empty> = not_err!(serde_json::from_str(&json));
-        assert_eq!(deserialized_json, encrypted_jwe);
+        let deserialized_json: crate::Compact = not_err!(serde_json::from_str(&json));
+        assert_eq!(deserialized_json, encrypted_jwe.clone().unwrap_encrypted());
 
         // Decrypt
         let decrypted_jwe = not_err!(encrypted_jwe.into_decrypted(
@@ -925,15 +923,14 @@ mod tests {
             },
             private: Default::default(),
         };
-        let jws = jws::Compact::new_decoded(
+        let jws = jws::Decoded::new(
             From::from(jws::RegisteredHeader {
                 algorithm: jwa::SignatureAlgorithm::HS256,
                 ..Default::default()
             }),
             claims,
         );
-        let jws =
-            not_err!(jws.into_encoded(&jws::Secret::Bytes("secret".to_string().into_bytes())));
+        let jws = not_err!(jws.encode(&jws::Secret::Bytes("secret".to_string().into_bytes())));
 
         // Construct the encryption key
         let key = cek_oct_key(256 / 8);
@@ -970,8 +967,8 @@ mod tests {
 
         // Serde test
         let json = not_err!(serde_json::to_string(&encrypted_jwe));
-        let deserialized_json: JWE<Empty, Empty, Empty> = not_err!(serde_json::from_str(&json));
-        assert_eq!(deserialized_json, encrypted_jwe);
+        let deserialized_json: crate::Compact = not_err!(serde_json::from_str(&json));
+        assert_eq!(deserialized_json, encrypted_jwe.clone().unwrap_encrypted());
 
         // Decrypt
         let decrypted_jwe = not_err!(encrypted_jwe.into_decrypted(

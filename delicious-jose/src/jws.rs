@@ -5,7 +5,7 @@
 mod compact;
 mod flattened;
 
-pub use compact::Compact;
+pub use compact::Decoded;
 pub use flattened::{Signable, SignedData};
 
 use crate::errors::Error;

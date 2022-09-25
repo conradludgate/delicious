@@ -174,7 +174,7 @@ use crate::errors::{Error, ValidationError};
 /// assert_eq!(*token.payload().unwrap(), expected_claims);
 /// # }
 /// ```
-pub type JWT<T, H> = jws::Compact<ClaimsSet<T>, H>;
+pub type JWT<T, H> = jws::Decoded<ClaimsSet<T>, H>;
 
 /// A convenience type alias of a "JWE" which is a compact JWE that contains a signed/unsigned compact JWS.
 ///
