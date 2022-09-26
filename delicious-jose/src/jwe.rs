@@ -10,7 +10,7 @@ use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::errors::{DecodeError, Error, ValidationError};
 use crate::jwa::{
-    self, ContentEncryptionAlgorithm, EncryptionOptions, EncryptionResult, KeyManagementAlgorithm,
+    ContentEncryptionAlgorithm, EncryptionOptions, EncryptionResult, KeyManagementAlgorithm,
 };
 use crate::jwk;
 use crate::Empty;
@@ -168,12 +168,12 @@ pub struct CekAlgorithmHeader {
     /// Header for PBES2 algorithm.
     /// PBKDF iteration count
     #[serde(rename = "p2c", skip_serializing_if = "Option::is_none")]
-    pub count: Option<Vec<u8>>,
+    pub count: Option<u32>,
 
     /// Header for PBES2 algorithm.
     /// PBKDF salt
     #[serde(rename = "p2s", skip_serializing_if = "Option::is_none")]
-    pub salt: Option<Vec<u8>>,
+    pub salt: Option<String>,
 }
 
 /// JWE Header, consisting of the registered fields and other custom fields
@@ -188,31 +188,6 @@ pub struct Header<T> {
     /// Private header fields
     #[serde(flatten)]
     pub private: T,
-}
-
-// impl<T: Serialize + DeserializeOwned> CompactJson for Header<T> {}
-
-impl<T: Serialize + DeserializeOwned> Header<T> {
-    /// Update CEK algorithm specific header fields based on a CEK encryption result
-    fn update_cek_algorithm(&mut self, encrypted: &EncryptionResult) {
-        if !encrypted.nonce.is_empty() {
-            self.cek_algorithm.nonce = Some(encrypted.nonce.clone());
-        }
-
-        if !encrypted.tag.is_empty() {
-            self.cek_algorithm.tag = Some(encrypted.tag.clone());
-        }
-    }
-
-    /// Extract the relevant fields from the header to build an `EncryptionResult` and strip them from the header
-    fn extract_cek_encryption_result(&mut self, encrypted_payload: &[u8]) -> EncryptionResult {
-        EncryptionResult {
-            encrypted: encrypted_payload.to_vec(),
-            nonce: self.cek_algorithm.nonce.take().unwrap_or_default(),
-            tag: self.cek_algorithm.tag.take().unwrap_or_default(),
-            ..Default::default()
-        }
-    }
 }
 
 impl Header<Empty> {
@@ -268,21 +243,15 @@ where
         use std::borrow::Cow;
 
         // Resolve encryption option
-        let (key_option, content_option): (_, Cow<'_, _>) =
-            match self.header.registered.cek_algorithm {
-                KeyManagementAlgorithm::DirectSymmetricKey => {
-                    (jwa::NONE_ENCRYPTION_OPTIONS, Cow::Borrowed(options))
-                }
-                _ => (
-                    options,
-                    Cow::Owned(
-                        self.header
-                            .registered
-                            .enc_algorithm
-                            .random_encryption_options()?,
-                    ),
-                ),
-            };
+        let content_option: Cow<'_, _> = match self.header.registered.cek_algorithm {
+            KeyManagementAlgorithm::DirectSymmetricKey => Cow::Borrowed(options),
+            _ => Cow::Owned(
+                self.header
+                    .registered
+                    .enc_algorithm
+                    .random_encryption_options()?,
+            ),
+        };
 
         // RFC 7516 Section 5.1 describes the steps involved in encryption.
         // From steps 1 to 8, we will first determine the CEK, and then encrypt the CEK.
@@ -291,14 +260,12 @@ where
             .registered
             .cek_algorithm
             .cek(self.header.registered.enc_algorithm, key)?;
+        let mut header = self.header.clone();
         let encrypted_cek = self.header.registered.cek_algorithm.wrap_key(
             cek.algorithm.octet_key()?,
             key,
-            key_option,
+            &mut header.cek_algorithm,
         )?;
-        // Update header
-        let mut header = self.header.clone();
-        header.update_cek_algorithm(&encrypted_cek);
 
         // Steps 9 and 10 involves calculating an initialization vector (nonce) for content encryption. We do
         // this as part of the encryption process later
@@ -324,7 +291,7 @@ where
         // Finally create the JWE
         let mut compact = crate::Compact::new();
         compact.push(&header)?;
-        compact.push_bytes(&encrypted_cek.encrypted);
+        compact.push_bytes(&encrypted_cek);
         compact.push_bytes(&encrypted_payload.nonce);
         compact.push_bytes(&encrypted_payload.encrypted);
         compact.push_bytes(&encrypted_payload.tag);
@@ -365,10 +332,10 @@ where
         // TODO: Steps 4-5 not implemented at the moment.
 
         // Steps 6-13 involve the computation of the cek
-        let cek_encryption_result = header.extract_cek_encryption_result(&encrypted_cek);
+        // let cek_encryption_result = header.extract_cek_encryption_result(&encrypted_cek);
         let cek = header.registered.cek_algorithm.unwrap_key(
-            &cek_encryption_result,
-            header.registered.enc_algorithm,
+            &encrypted_cek,
+            &mut header.cek_algorithm,
             key,
         )?;
 
@@ -602,12 +569,10 @@ mod tests {
             }),
             payload.clone(),
         );
-        let options = EncryptionOptions::AES_GCM {
-            nonce: random_aes_gcm_nonce().unwrap(),
-        };
+        jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         {
             // Check that new header values are added

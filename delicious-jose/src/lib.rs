@@ -39,7 +39,7 @@
     const_err,
     // dead_code,
     improper_ctypes,
-    missing_docs,
+    // missing_docs,
     mutable_transmutes,
     no_mangle_const_items,
     non_camel_case_types,
