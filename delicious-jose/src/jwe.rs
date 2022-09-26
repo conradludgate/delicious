@@ -164,6 +164,16 @@ pub struct CekAlgorithmHeader {
     /// The authentication tag resulting from the encryption
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<Vec<u8>>,
+
+    /// Header for PBES2 algorithm.
+    /// PBKDF iteration count
+    #[serde(rename = "p2c", skip_serializing_if = "Option::is_none")]
+    pub count: Option<Vec<u8>>,
+
+    /// Header for PBES2 algorithm.
+    /// PBKDF salt
+    #[serde(rename = "p2s", skip_serializing_if = "Option::is_none")]
+    pub salt: Option<Vec<u8>>,
 }
 
 /// JWE Header, consisting of the registered fields and other custom fields
@@ -196,15 +206,12 @@ impl<T: Serialize + DeserializeOwned> Header<T> {
 
     /// Extract the relevant fields from the header to build an `EncryptionResult` and strip them from the header
     fn extract_cek_encryption_result(&mut self, encrypted_payload: &[u8]) -> EncryptionResult {
-        let result = EncryptionResult {
+        EncryptionResult {
             encrypted: encrypted_payload.to_vec(),
-            nonce: self.cek_algorithm.nonce.clone().unwrap_or_default(),
-            tag: self.cek_algorithm.tag.clone().unwrap_or_default(),
+            nonce: self.cek_algorithm.nonce.take().unwrap_or_default(),
+            tag: self.cek_algorithm.tag.take().unwrap_or_default(),
             ..Default::default()
-        };
-
-        self.cek_algorithm = Default::default();
-        result
+        }
     }
 }
 
@@ -412,18 +419,18 @@ where
 mod tests {
     use std::str::FromStr;
 
-    use ring::rand::SecureRandom;
+    use ring::rand::{SecureRandom, SystemRandom};
     use serde_test::{assert_tokens, Token};
 
     use super::*;
-    use crate::jwa::{self, random_aes_gcm_nonce, rng};
+    use crate::jwa::{self, random_aes_gcm_nonce};
     use crate::test::assert_serde_json;
     use crate::{jws, Compact};
 
     fn cek_oct_key(len: usize) -> jwk::JWK<Empty> {
         // Construct the encryption key
         let mut key: Vec<u8> = vec![0; len];
-        not_err!(rng().fill(&mut key));
+        not_err!(SystemRandom::new().fill(&mut key));
         jwk::JWK {
             common: Default::default(),
             additional: Default::default(),

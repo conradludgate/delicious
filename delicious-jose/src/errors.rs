@@ -116,8 +116,26 @@ impl_from_error!(DecodeError, Error::DecodeError);
 impl_from_error!(io::Error, Error::IOError);
 impl_from_error!(ring::error::KeyRejected, Error::KeyRejected);
 
+impl From<crypto_common::InvalidLength> for Error {
+    fn from(_: crypto_common::InvalidLength) -> Self {
+        Error::UnspecifiedCryptographicError
+    }
+}
+
 impl From<ring::error::Unspecified> for Error {
     fn from(_: ring::error::Unspecified) -> Self {
+        Error::UnspecifiedCryptographicError
+    }
+}
+
+impl From<::hmac::digest::MacError> for Error {
+    fn from(_: ::hmac::digest::MacError) -> Self {
+        Error::UnspecifiedCryptographicError
+    }
+}
+
+impl From<cipher::block_padding::UnpadError> for Error {
+    fn from(_: cipher::block_padding::UnpadError) -> Self {
         Error::UnspecifiedCryptographicError
     }
 }
