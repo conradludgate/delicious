@@ -1,4 +1,4 @@
-use crate::{errors::Error, jwa::EncryptionResult, jwk};
+use crate::{errors::Error, jwa::EncryptionResult};
 use ring::aead;
 
 /// Key wrapping with AES GCM. [RFC7518#4.7](https://tools.ietf.org/html/rfc7518#section-4.7)
@@ -42,7 +42,7 @@ impl AES_GCM {
         self,
         encrypted: &EncryptionResult,
         key: &[u8],
-    ) -> Result<jwk::JWK<()>, Error> {
+    ) -> Result<Vec<u8>, Error> {
         use AES_GCM::{A128, A256};
 
         let algorithm = match self {
@@ -52,18 +52,7 @@ impl AES_GCM {
         };
 
         let cek = aes_gcm_decrypt(algorithm, encrypted, key)?;
-        Ok(jwk::JWK {
-            algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
-                value: cek,
-                key_type: Default::default(),
-            }),
-            common: jwk::CommonParameters {
-                public_key_use: Some(jwk::PublicKeyUse::Encryption),
-                algorithm: None,
-                ..Default::default()
-            },
-            additional: Default::default(),
-        })
+        Ok(cek)
     }
 }
 
@@ -124,6 +113,7 @@ mod tests {
     use crate::{
         jwa::{kma::Algorithm, random_aes_gcm_nonce, AES_GCM_NONCE_LENGTH},
         jwe::CekAlgorithmHeader,
+        jwk,
     };
 
     use super::*;
@@ -212,9 +202,8 @@ mod tests {
         let mut key: Vec<u8> = vec![0; 128 / 8];
         not_err!(SystemRandom::new().fill(&mut key));
 
-        let key = jwk::JWK::<()> {
+        let key = jwk::Specified {
             common: Default::default(),
-            additional: Default::default(),
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
                 key_type: Default::default(),
                 value: key,
@@ -241,9 +230,8 @@ mod tests {
         let mut key: Vec<u8> = vec![0; 256 / 8];
         not_err!(SystemRandom::new().fill(&mut key));
 
-        let key = jwk::JWK::<()> {
+        let key = jwk::Specified {
             common: Default::default(),
-            additional: Default::default(),
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
                 key_type: Default::default(),
                 value: key,

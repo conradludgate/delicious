@@ -1,7 +1,6 @@
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut};
 use cipher::block_padding::Pkcs7;
 use hmac::Hmac;
-use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
     errors::Error,
@@ -13,11 +12,11 @@ use crate::{
 };
 
 impl ContentEncryptionAlgorithm {
-    pub(crate) fn aes_cbc_encrypt<T: Serialize + DeserializeOwned>(
+    pub(crate) fn aes_cbc_encrypt(
         self,
         payload: &[u8],
         aad: &[u8],
-        key: &jwk::JWK<T>,
+        key: &jwk::Specified,
         options: &EncryptionOptions,
     ) -> Result<EncryptionResult, Error> {
         use self::ContentEncryptionAlgorithm::{A128CBC_HS256, A192CBC_HS384, A256CBC_HS512};
@@ -41,10 +40,10 @@ impl ContentEncryptionAlgorithm {
         aes_cbc_sha2_encrypt(algorithm, payload, nonce.as_slice(), aad, key)
     }
 
-    pub(crate) fn aes_cbc_decrypt<T: Serialize + DeserializeOwned>(
+    pub(crate) fn aes_cbc_decrypt(
         self,
         encrypted: &EncryptionResult,
-        key: &jwk::JWK<T>,
+        key: &jwk::Specified,
     ) -> Result<Vec<u8>, Error> {
         use self::ContentEncryptionAlgorithm::{A128CBC_HS256, A192CBC_HS384, A256CBC_HS512};
 

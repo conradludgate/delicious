@@ -1,6 +1,6 @@
 //! [Cryptographic Algorithms for Key Management](https://www.rfc-editor.org/rfc/rfc7518#section-4)
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{errors::Error, jwa::EncryptionResult, jwe::CekAlgorithmHeader, jwk};
 
@@ -90,14 +90,11 @@ impl Algorithm {
     /// If the algorithm is `dir` or `DirectSymmetricKey`, the key provided is the CEK.
     /// Otherwise, the appropriate algorithm will be used to derive or generate the required CEK
     /// using the provided key.
-    pub fn cek<T>(
+    pub fn cek(
         self,
         content_alg: ContentEncryptionAlgorithm,
-        key: &jwk::JWK<T>,
-    ) -> Result<jwk::JWK<()>, Error>
-    where
-        T: Serialize + DeserializeOwned,
-    {
+        key: &jwk::Specified,
+    ) -> Result<jwk::Specified, Error> {
         use self::Algorithm::{DirectSymmetricKey, AES_GCM_KW};
 
         match self {
@@ -108,19 +105,16 @@ impl Algorithm {
         }
     }
 
-    fn cek_direct<T>(key: &jwk::JWK<T>) -> Result<jwk::JWK<()>, Error>
-    where
-        T: Serialize + DeserializeOwned,
-    {
+    fn cek_direct(key: &jwk::Specified) -> Result<jwk::Specified, Error> {
         match key.key_type() {
-            jwk::KeyType::Octet => Ok(key.clone_without_additional()),
+            jwk::KeyType::Octet => Ok(key.clone()),
             others => Err(unexpected_key_type_error!(jwk::KeyType::Octet, others)),
         }
     }
 
-    fn cek_aes_gcm(content_alg: ContentEncryptionAlgorithm) -> Result<jwk::JWK<()>, Error> {
+    fn cek_aes_gcm(content_alg: ContentEncryptionAlgorithm) -> Result<jwk::Specified, Error> {
         let key = content_alg.generate_key()?;
-        Ok(jwk::JWK {
+        Ok(jwk::Specified {
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
                 value: key,
                 key_type: Default::default(),
@@ -130,15 +124,14 @@ impl Algorithm {
                 algorithm: Some(super::Algorithm::ContentEncryption(content_alg)),
                 ..Default::default()
             },
-            additional: Default::default(),
         })
     }
 
     /// Encrypt or wrap a Content Encryption Key with the provided algorithm
-    pub fn wrap_key<T: Serialize + DeserializeOwned>(
+    pub fn wrap_key(
         self,
         payload: &[u8],
-        key: &jwk::JWK<T>,
+        key: &jwk::Specified,
         header: &mut CekAlgorithmHeader,
     ) -> Result<Vec<u8>, Error> {
         use self::Algorithm::{DirectSymmetricKey, AES_GCM_KW, PBES2};
@@ -162,24 +155,37 @@ impl Algorithm {
     }
 
     /// Decrypt or unwrap a CEK with the provided algorithm
-    pub fn unwrap_key<T: Serialize + DeserializeOwned>(
+    pub fn unwrap_key(
         self,
         encrypted: &[u8],
         header: &mut CekAlgorithmHeader,
-        key: &jwk::JWK<T>,
-    ) -> Result<jwk::JWK<()>, Error> {
+        key: &jwk::Specified,
+    ) -> Result<jwk::Specified, Error> {
         use self::Algorithm::{DirectSymmetricKey, AES_GCM_KW, PBES2};
 
         match self {
-            AES_GCM_KW(kma) => kma.aes_gcm_decrypt(
-                &EncryptionResult {
-                    encrypted: encrypted.to_vec(),
-                    nonce: header.nonce.take().unwrap_or_default(),
-                    tag: header.tag.take().unwrap_or_default(),
-                    ..Default::default()
-                },
-                key.algorithm.octet_key()?,
-            ),
+            AES_GCM_KW(kma) => {
+                let value = kma.aes_gcm_decrypt(
+                    &EncryptionResult {
+                        encrypted: encrypted.to_vec(),
+                        nonce: header.nonce.take().unwrap_or_default(),
+                        tag: header.tag.take().unwrap_or_default(),
+                        ..Default::default()
+                    },
+                    key.algorithm.octet_key()?,
+                )?;
+                Ok(jwk::Specified {
+                    algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
+                        value,
+                        key_type: Default::default(),
+                    }),
+                    common: jwk::CommonParameters {
+                        public_key_use: Some(jwk::PublicKeyUse::Encryption),
+                        algorithm: None,
+                        ..Default::default()
+                    },
+                })
+            }
             PBES2(kma) => {
                 let value = kma.decrypt(
                     encrypted,
@@ -188,7 +194,7 @@ impl Algorithm {
                     header.count.take().unwrap_or_default(),
                 )?;
 
-                Ok(jwk::JWK {
+                Ok(jwk::Specified {
                     algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
                         value,
                         key_type: Default::default(),
@@ -197,10 +203,9 @@ impl Algorithm {
                         public_key_use: Some(jwk::PublicKeyUse::Encryption),
                         ..Default::default()
                     },
-                    additional: Default::default(),
                 })
             }
-            DirectSymmetricKey => Ok(key.clone_without_additional()),
+            DirectSymmetricKey => Ok(key.clone()),
             _ => Err(Error::UnsupportedOperation),
         }
     }
@@ -222,9 +227,8 @@ mod tests {
         let mut key: Vec<u8> = vec![0; 256 / 8];
         not_err!(SystemRandom::new().fill(&mut key));
 
-        let key = jwk::JWK::<()> {
+        let key = jwk::Specified {
             common: Default::default(),
-            additional: Default::default(),
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
                 key_type: Default::default(),
                 value: key,
@@ -245,9 +249,8 @@ mod tests {
         let mut key: Vec<u8> = vec![0; 128 / 8];
         not_err!(SystemRandom::new().fill(&mut key));
 
-        let key = jwk::JWK::<()> {
+        let key = jwk::Specified {
             common: Default::default(),
-            additional: Default::default(),
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
                 key_type: Default::default(),
                 value: key,
@@ -274,9 +277,8 @@ mod tests {
         let mut key: Vec<u8> = vec![0; 256 / 8];
         not_err!(SystemRandom::new().fill(&mut key));
 
-        let key = jwk::JWK::<()> {
+        let key = jwk::Specified {
             common: Default::default(),
-            additional: Default::default(),
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
                 key_type: Default::default(),
                 value: key,

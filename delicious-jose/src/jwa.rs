@@ -9,7 +9,6 @@ use ring::constant_time::verify_slices_are_equal;
 use ring::rand::SystemRandom;
 use ring::signature::KeyPair;
 use ring::{aead, hmac, rand, signature};
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::errors::Error;
@@ -427,11 +426,11 @@ impl ContentEncryptionAlgorithm {
     }
 
     /// Encrypt some payload with the provided algorith
-    pub fn encrypt<T: Serialize + DeserializeOwned>(
+    pub fn encrypt(
         self,
         payload: &[u8],
         aad: &[u8],
-        key: &jwk::JWK<T>,
+        key: &jwk::Specified,
         options: &EncryptionOptions,
     ) -> Result<EncryptionResult, Error> {
         use self::ContentEncryptionAlgorithm::{
@@ -449,10 +448,10 @@ impl ContentEncryptionAlgorithm {
     }
 
     /// Decrypt some payload with the provided algorith,
-    pub fn decrypt<T: Serialize + DeserializeOwned>(
+    pub fn decrypt(
         self,
         encrypted: &EncryptionResult,
-        key: &jwk::JWK<T>,
+        key: &jwk::Specified,
     ) -> Result<Vec<u8>, Error> {
         use self::ContentEncryptionAlgorithm::{
             A128CBC_HS256, A128GCM, A192CBC_HS384, A192GCM, A256CBC_HS512, A256GCM,
@@ -910,9 +909,8 @@ mod tests {
         let mut key: Vec<u8> = vec![0; 128 / 8];
         not_err!(SystemRandom::new().fill(&mut key));
 
-        let key = jwk::JWK::<()> {
+        let key = jwk::Specified {
             common: Default::default(),
-            additional: Default::default(),
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
                 key_type: Default::default(),
                 value: key,
@@ -938,9 +936,8 @@ mod tests {
         let mut key: Vec<u8> = vec![0; 256 / 8];
         not_err!(SystemRandom::new().fill(&mut key));
 
-        let key = jwk::JWK::<()> {
+        let key = jwk::Specified {
             common: Default::default(),
-            additional: Default::default(),
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
                 key_type: Default::default(),
                 value: key,

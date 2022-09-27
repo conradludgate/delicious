@@ -240,7 +240,7 @@ impl CompactPart for () {
 /// assert_eq!(*token.payload().unwrap(), expected_claims);
 /// # }
 /// ```
-pub type JWT<T, H> = jws::Decoded<ClaimsSet<T>, H>;
+pub type JWT<T> = jws::Decoded<ClaimsSet<T>, ()>;
 
 /// A convenience type alias of a "JWE" which is a compact JWE that contains a signed/unsigned compact JWS.
 ///
@@ -357,7 +357,7 @@ pub type JWT<T, H> = jws::Decoded<ClaimsSet<T>, H>;
 /// nonce_counter = nonce_counter + 1u8;
 /// # }
 /// ```
-pub type JWE<H> = jwe::Decrypted<Compact, H>;
+pub type JWE = jwe::Decrypted<Compact, ()>;
 
 /// A collection of `CompactPart`s that have been converted to `Base64Url`
 #[derive(Debug, Eq, PartialEq, Clone)]

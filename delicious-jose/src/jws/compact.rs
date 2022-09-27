@@ -107,7 +107,7 @@ where
             .ok_or(ValidationError::KidMissing)?;
         let jwk = jwks.find(key_id).ok_or(ValidationError::KeyNotFound)?;
 
-        let algorithm = match jwk.common.algorithm {
+        let algorithm = match jwk.specified.common.algorithm {
             Some(jwk_alg) => {
                 let algorithm = match jwk_alg {
                     Algorithm::Signature(algorithm) => algorithm,
@@ -137,7 +137,7 @@ where
             },
         };
 
-        let secret = match &jwk.algorithm {
+        let secret = match &jwk.specified.algorithm {
             AlgorithmParameters::RSA(rsa) => rsa.jws_public_key_secret(),
             AlgorithmParameters::OctetKey(oct) => Secret::Bytes(oct.value.clone()),
             _ => Err(ValidationError::UnsupportedKeyAlgorithm)?,

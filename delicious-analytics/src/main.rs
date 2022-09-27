@@ -13,8 +13,8 @@ impl SecretKey {
     fn from_request<B>(req: &RequestParts<B>) -> &Self {
         req.extensions().get().unwrap()
     }
-    fn to_jwk(&self) -> delicious_jose::jwk::JWK<()> {
-        delicious_jose::jwk::JWK::new_octet_key(&self.0, ())
+    fn to_jwk(&self) -> delicious_jose::jwk::Specified {
+        delicious_jose::jwk::Specified::new_octet_key(&self.0)
     }
     fn to_secret(&self) -> delicious_jose::jws::Secret {
         delicious_jose::jws::Secret::Bytes(self.0.clone())

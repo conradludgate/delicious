@@ -6,10 +6,10 @@ pub use compact::Decoded;
 pub use flattened::{Signable, SignedData};
 use serde::de::DeserializeOwned;
 
-use crate::CompactPart;
 use crate::errors::Error;
 use crate::jwa::SignatureAlgorithm;
 use crate::jwk;
+use crate::CompactPart;
 
 use num_bigint::BigUint;
 use ring::signature;
