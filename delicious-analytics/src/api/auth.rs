@@ -31,8 +31,9 @@ impl<B: Send> FromRequest<B> for Auth {
         let jwk = secret.to_jwk();
 
         let token = Compact::decode(token.token());
+        let token = token.try_into().map_err(|_| StatusCode::UNAUTHORIZED)?;
         let jwe = JWE::<()>::decrypt(
-            &token,
+            token,
             &jwk,
             kma::PBES2::HS256_A128KW.into(),
             ContentEncryptionAlgorithm::A128CBC_HS256,

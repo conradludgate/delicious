@@ -59,7 +59,7 @@ where
             .registered
             .algorithm
             .sign(encoded_payload.as_bytes(), secret)?;
-        compact.push_bytes(signature);
+        compact.push(signature)?;
         Ok(compact)
     }
 
@@ -75,11 +75,11 @@ where
             .verify(signature.as_ref(), payload.as_ref(), secret)
             .map_err(|_| ValidationError::InvalidSignature)?;
 
-        let header: Header<H> = encoded.deser_part(0)?;
+        let header: Header<H> = encoded.part(0)?;
         if header.registered.algorithm != algorithm {
             Err(ValidationError::WrongAlgorithmHeader)?;
         }
-        let decoded_claims: T = encoded.deser_part(1)?;
+        let decoded_claims: T = encoded.part(1)?;
 
         Ok(Self::new(header, decoded_claims))
     }
@@ -99,7 +99,7 @@ where
         expected_algorithm: Option<SignatureAlgorithm>,
     ) -> Result<Self, Error> {
         let (payload, signature) = encoded.parse_triple()?;
-        let header: Header<H> = encoded.deser_part(0)?;
+        let header: Header<H> = encoded.part(0)?;
         let key_id = header
             .registered
             .key_id
@@ -147,7 +147,7 @@ where
             .verify(signature.as_ref(), payload.as_ref(), &secret)
             .map_err(|_| ValidationError::InvalidSignature)?;
 
-        let decoded_claims: T = encoded.deser_part(1)?;
+        let decoded_claims: T = encoded.part(1)?;
 
         Ok(Self::new(header, decoded_claims))
     }

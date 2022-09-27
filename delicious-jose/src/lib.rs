@@ -381,8 +381,7 @@ impl Compact {
         Ok(())
     }
 
-    /// Push a `CompactPart` to the end
-    pub fn push_bytes(&mut self, input: &[u8]) {
+    pub(crate) fn push_bytes(&mut self, input: &[u8]) {
         base64::encode_config_buf(input, base64::URL_SAFE_NO_PAD, &mut self.source);
 
         // push ending index
@@ -437,7 +436,7 @@ impl Compact {
     }
 
     /// Convenience function to retrieve a part at a certain index and decode into the type desired
-    pub(crate) fn part(&self, index: usize) -> Result<&str, Error> {
+    pub(crate) fn part_base64(&self, index: usize) -> Result<&str, Error> {
         let end = *self
             .indices
             .get(index)
@@ -450,16 +449,8 @@ impl Compact {
     }
 
     /// Convenience function to retrieve a part at a certain index and decode into the type desired
-    pub fn part_decoded(&self, index: usize) -> Result<Vec<u8>, Error> {
-        Ok(base64::decode_config(
-            self.part(index)?,
-            base64::URL_SAFE_NO_PAD,
-        )?)
-    }
-
-    /// Convenience function to retrieve a part at a certain index and decode into the type desired
-    pub fn deser_part<T: CompactPart>(&self, index: usize) -> Result<T, Error> {
-        T::from_base64(self.part(index)?)
+    pub fn part<T: CompactPart>(&self, index: usize) -> Result<T, Error> {
+        T::from_base64(self.part_base64(index)?)
     }
 
     pub(crate) fn parse_triple(&self) -> Result<(&str, Vec<u8>), Error> {

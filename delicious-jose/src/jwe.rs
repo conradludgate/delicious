@@ -11,7 +11,7 @@ use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::errors::{DecodeError, Error, ValidationError};
 use crate::jwa::{kma, ContentEncryptionAlgorithm, EncryptionOptions, EncryptionResult};
-use crate::{jwk, CompactPart};
+use crate::{jwk, Compact, CompactPart};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 /// Compression algorithm applied to plaintext before encryption.
@@ -214,6 +214,60 @@ impl From<RegisteredHeader> for Header<()> {
     }
 }
 
+pub struct Encrypted<H = ()> {
+    header: Header<H>,
+    header_base64: String,
+    encrypted_cek: Vec<u8>,
+    iv: Vec<u8>,
+    encrypted_payload: Vec<u8>,
+    tag: Vec<u8>,
+}
+
+impl<H> Encrypted<H>
+where
+    H: Serialize + DeserializeOwned + Clone,
+{
+    /// Turns the encrypted JWE into it's compact form
+    pub fn compact(&self) -> Compact {
+        let mut compact = Compact::new();
+        compact.push_base64(&self.header_base64);
+        compact.push_bytes(&self.encrypted_cek);
+        compact.push_bytes(&self.iv);
+        compact.push_bytes(&self.encrypted_payload);
+        compact.push_bytes(&self.tag);
+        compact
+    }
+}
+
+impl<H> TryFrom<Compact> for Encrypted<H>
+where
+    H: Serialize + DeserializeOwned + Clone,
+{
+    type Error = Error;
+
+    fn try_from(encrypted: Compact) -> Result<Self, Self::Error> {
+        if encrypted.len() != 5 {
+            Err(DecodeError::PartsLengthError {
+                actual: encrypted.len(),
+                expected: 5,
+            })?;
+        }
+        let header: Header<H> = encrypted.part(0)?;
+        let encrypted_cek = encrypted.part(1)?;
+        let iv = encrypted.part(2)?;
+        let encrypted_payload = encrypted.part(3)?;
+        let tag = encrypted.part(4)?;
+        Ok(Self {
+            header,
+            header_base64: encrypted.part_base64(0)?.to_owned(),
+            encrypted_cek,
+            iv,
+            encrypted_payload,
+            tag,
+        })
+    }
+}
+
 /// Rust representation of a JWE
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Decrypted<T, H = ()> {
@@ -247,7 +301,7 @@ where
         mut self,
         key: &jwk::JWK<K>,
         options: &EncryptionOptions,
-    ) -> Result<crate::Compact, Error> {
+    ) -> Result<Encrypted<H>, Error> {
         // Resolve encryption option
         let content_option: Cow<'_, _> = match self.header.registered.cek_algorithm {
             kma::Algorithm::DirectSymmetricKey => Cow::Borrowed(options),
@@ -283,8 +337,7 @@ where
 
         // Steps 12 to 14 involves the calculation of `Additional Authenticated Data` for encryption. In
         // our compact example, our header is the AAD.
-        let encoded_protected_header =
-            base64::encode_config(&serde_json::to_vec(&self.header)?, base64::URL_SAFE_NO_PAD);
+        let encoded_protected_header = self.header.to_base64()?;
         // Step 15 involves the actual encryption.
         let encrypted_payload = self.header.registered.enc_algorithm.encrypt(
             &payload,
@@ -294,37 +347,32 @@ where
         )?;
 
         // Finally create the JWE
-        let mut compact = crate::Compact::new();
-        compact.push_base64(&encoded_protected_header);
-        compact.push_bytes(&encrypted_cek);
-        compact.push_bytes(&encrypted_payload.nonce);
-        compact.push_bytes(&encrypted_payload.encrypted);
-        compact.push_bytes(&encrypted_payload.tag);
-
-        Ok(compact)
+        Ok(Encrypted {
+            header_base64: encoded_protected_header.into_owned(),
+            header: self.header,
+            encrypted_cek,
+            iv: encrypted_payload.nonce,
+            encrypted_payload: encrypted_payload.encrypted,
+            tag: encrypted_payload.tag,
+        })
     }
 
     /// Decrypt an encrypted JWE. Provide the expected algorithms to mitigate an attacker modifying the
     /// fields
     pub fn decrypt<K: Serialize + DeserializeOwned>(
-        encrypted: &crate::Compact,
+        encrypted: Encrypted<H>,
         key: &jwk::JWK<K>,
         cek_alg: kma::Algorithm,
         enc_alg: ContentEncryptionAlgorithm,
     ) -> Result<Self, Error> {
-        if encrypted.len() != 5 {
-            Err(DecodeError::PartsLengthError {
-                actual: encrypted.len(),
-                expected: 5,
-            })?;
-        }
-        // RFC 7516 Section 5.2 describes the steps involved in decryption.
-        // Steps 1-3
-        let mut header: Header<H> = encrypted.deser_part(0)?;
-        let encrypted_cek = encrypted.part_decoded(1)?;
-        let nonce = encrypted.part_decoded(2)?;
-        let encrypted_payload = encrypted.part_decoded(3)?;
-        let tag = encrypted.part_decoded(4)?;
+        let Encrypted {
+            mut header,
+            header_base64,
+            encrypted_cek,
+            iv,
+            encrypted_payload,
+            tag,
+        } = encrypted;
 
         // Verify that the algorithms are expected
         if header.registered.cek_algorithm != cek_alg || header.registered.enc_algorithm != enc_alg
@@ -345,12 +393,11 @@ where
         )?;
 
         // Build encryption result as per steps 14-15
-        let encoded_protected_header = encrypted.part(0)?;
         let encrypted_payload_result = EncryptionResult {
-            nonce,
+            nonce: iv,
             tag,
             encrypted: encrypted_payload,
-            additional_data: encoded_protected_header.as_bytes().to_vec(),
+            additional_data: header_base64.into_bytes(),
         };
 
         let payload = header
@@ -497,9 +544,10 @@ mod tests {
 
         let key: jwk::JWK<()> = not_err!(serde_json::from_str(key_json));
         let token: Compact = Compact::decode(external_token);
+        let token: Encrypted<()> = token.try_into().unwrap();
 
         let decrypted_jwe = not_err!(Decrypted::<Json<String>, ()>::decrypt(
-            &token,
+            token,
             &key,
             kma::Algorithm::DirectSymmetricKey,
             jwa::ContentEncryptionAlgorithm::A256GCM,
@@ -577,17 +625,17 @@ mod tests {
         jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None)).compact();
 
         {
             // Check that new header values are added
             let compact = encrypted_jwe.clone();
-            let header: Header<()> = compact.deser_part(0).unwrap();
+            let header: Header<()> = compact.part(0).unwrap();
             assert!(header.cek_algorithm.nonce.is_some());
             assert!(header.cek_algorithm.tag.is_some());
 
             // Check that the encrypted key part is not empty
-            let cek: Vec<u8> = compact.part_decoded(1).unwrap();
+            let cek: Vec<u8> = compact.part(1).unwrap();
             assert_eq!(256 / 8, cek.len());
         }
 
@@ -597,8 +645,9 @@ mod tests {
         assert_eq!(deserialized_json, encrypted_jwe);
 
         // Decrypt
+        let encrypted_jwe: Encrypted<()> = encrypted_jwe.try_into().unwrap();
         let decrypted_jwe = not_err!(Decrypted::<Json<String>, ()>::decrypt(
-            &encrypted_jwe,
+            encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM
@@ -647,17 +696,17 @@ mod tests {
         jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None)).compact();
 
         {
             // Check that new header values are added
             let compact = encrypted_jwe.clone();
-            let header: Header<()> = compact.deser_part(0).unwrap();
+            let header: Header<()> = compact.part(0).unwrap();
             assert!(header.cek_algorithm.nonce.is_some());
             assert!(header.cek_algorithm.tag.is_some());
 
             // Check that the encrypted key part is not empty
-            let cek: Vec<u8> = compact.part_decoded(1).unwrap();
+            let cek: Vec<u8> = compact.part(1).unwrap();
             assert_eq!(256 / 8, cek.len());
         }
 
@@ -667,8 +716,9 @@ mod tests {
         assert_eq!(deserialized_json, encrypted_jwe);
 
         // Decrypt
+        let encrypted_jwe: Encrypted<()> = encrypted_jwe.try_into().unwrap();
         let decrypted_jwe = not_err!(JWE::<()>::decrypt(
-            &encrypted_jwe,
+            encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM
@@ -719,17 +769,17 @@ mod tests {
         };
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &options)).compact();
 
         {
             let compact = encrypted_jwe.clone();
             // Check that new header values are empty
-            let header: Header<()> = compact.deser_part(0).unwrap();
+            let header: Header<()> = compact.part(0).unwrap();
             assert!(header.cek_algorithm.nonce.is_none());
             assert!(header.cek_algorithm.tag.is_none());
 
             // Check that the encrypted key part is empty
-            let cek: Vec<u8> = compact.part_decoded(1).unwrap();
+            let cek: Vec<u8> = compact.part(1).unwrap();
             assert!(cek.is_empty());
         }
 
@@ -739,8 +789,9 @@ mod tests {
         assert_eq!(deserialized_json, encrypted_jwe);
 
         // Decrypt
+        let encrypted_jwe: Encrypted<()> = encrypted_jwe.try_into().unwrap();
         let decrypted_jwe = not_err!(JWE::<()>::decrypt(
-            &encrypted_jwe,
+            encrypted_jwe,
             &key,
             kma::Algorithm::DirectSymmetricKey,
             ContentEncryptionAlgorithm::A256GCM
@@ -767,10 +818,11 @@ mod tests {
         jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None)).compact();
 
+        let encrypted_jwe: Encrypted<()> = encrypted_jwe.try_into().unwrap();
         let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
-            &encrypted_jwe,
+            encrypted_jwe,
             &key,
             kma::AES_GCM::A128.into(),
             ContentEncryptionAlgorithm::A256GCM,
@@ -797,10 +849,11 @@ mod tests {
         jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None)).compact();
 
+        let encrypted_jwe: Encrypted<()> = encrypted_jwe.try_into().unwrap();
         let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
-            &encrypted_jwe,
+            encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A128GCM,
@@ -811,15 +864,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "PartsLengthError")]
     fn decrypt_with_incorrect_length() {
-        let key = cek_oct_key(256 / 8);
         let invalid = Compact::decode("INVALID");
-        let _ = Decrypted::<(), ()>::decrypt(
-            &invalid,
-            &key,
-            kma::AES_GCM::A256.into(),
-            ContentEncryptionAlgorithm::A128GCM,
-        )
-        .unwrap();
+        let _: Encrypted<()> = invalid.try_into().unwrap();
     }
 
     #[test]
@@ -841,26 +887,15 @@ mod tests {
         jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
+        let mut encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
-        let mut header: Header<()> = encrypted_jwe.deser_part(0).unwrap();
-        header.cek_algorithm.nonce = Some(vec![0; 96 / 8]);
-        let s = format!(
-            "{}.{}.{}.{}.{}",
-            base64::encode_config(
-                serde_json::to_string(&header).unwrap(),
-                base64::URL_SAFE_NO_PAD
-            ),
-            encrypted_jwe.part(1).unwrap(),
-            encrypted_jwe.part(2).unwrap(),
-            encrypted_jwe.part(3).unwrap(),
-            encrypted_jwe.part(4).unwrap()
-        );
+        encrypted_jwe.header.cek_algorithm.nonce = Some(vec![0; 96 / 8]);
+        encrypted_jwe.header_base64 = encrypted_jwe.header.to_base64().unwrap().into_owned();
 
-        let encrypted_jwe = Compact::decode(&s);
+        // Decrypt
         let _ = Decrypted::<Vec<u8>, ()>::decrypt(
-            &encrypted_jwe,
+            encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM,
@@ -887,26 +922,15 @@ mod tests {
         jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
+        let mut encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
-        let mut header: Header<()> = encrypted_jwe.deser_part(0).unwrap();
-        header.cek_algorithm.tag = Some(vec![0; 96 / 8]);
-        let s = format!(
-            "{}.{}.{}.{}.{}",
-            base64::encode_config(
-                serde_json::to_string(&header).unwrap(),
-                base64::URL_SAFE_NO_PAD
-            ),
-            encrypted_jwe.part(1).unwrap(),
-            encrypted_jwe.part(2).unwrap(),
-            encrypted_jwe.part(3).unwrap(),
-            encrypted_jwe.part(4).unwrap()
-        );
+        encrypted_jwe.header.cek_algorithm.tag = Some(vec![0; 96 / 8]);
+        encrypted_jwe.header_base64 = encrypted_jwe.header.to_base64().unwrap().into_owned();
 
-        let encrypted_jwe = Compact::decode(&s);
+        // Decrypt
         let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
-            &encrypted_jwe,
+            encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM,
@@ -933,21 +957,14 @@ mod tests {
         jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
+        let mut encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
-        let s = format!(
-            "{}.{}.{}.{}.{}",
-            encrypted_jwe.part(0).unwrap(),
-            encrypted_jwe.part(1).unwrap(),
-            encrypted_jwe.part(2).unwrap(),
-            encrypted_jwe.part(3).unwrap(),
-            base64::encode_config(&[0], base64::URL_SAFE_NO_PAD),
-        );
+        encrypted_jwe.tag = vec![0];
 
-        let encrypted_jwe = Compact::decode(&s);
+        // Decrypt
         let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
-            &encrypted_jwe,
+            encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM,
@@ -975,26 +992,15 @@ mod tests {
         jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
+        let mut encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
-        let mut header: Header<()> = encrypted_jwe.deser_part(0).unwrap();
-        header.registered.media_type = Some("JOSE+JSON".to_string());
-        let s = format!(
-            "{}.{}.{}.{}.{}",
-            base64::encode_config(
-                serde_json::to_string(&header).unwrap(),
-                base64::URL_SAFE_NO_PAD
-            ),
-            encrypted_jwe.part(1).unwrap(),
-            encrypted_jwe.part(2).unwrap(),
-            encrypted_jwe.part(3).unwrap(),
-            encrypted_jwe.part(4).unwrap()
-        );
+        encrypted_jwe.header.registered.media_type = Some("JOSE+JSON".to_string());
+        encrypted_jwe.header_base64 = encrypted_jwe.header.to_base64().unwrap().into_owned();
 
-        let encrypted_jwe = Compact::decode(&s);
+        // Decrypt
         let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
-            &encrypted_jwe,
+            encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM,
@@ -1022,21 +1028,14 @@ mod tests {
         jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
+        let mut encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
-        let s = format!(
-            "{}.{}.{}.{}.{}",
-            encrypted_jwe.part(0).unwrap(),
-            base64::encode_config(vec![0u8; 256 / 8], base64::URL_SAFE_NO_PAD),
-            encrypted_jwe.part(2).unwrap(),
-            encrypted_jwe.part(3).unwrap(),
-            encrypted_jwe.part(4).unwrap()
-        );
+        encrypted_jwe.encrypted_cek = vec![0u8; 256 / 8];
 
-        let encrypted_jwe = Compact::decode(&s);
+        // Decrypt
         let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
-            &encrypted_jwe,
+            encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM,
@@ -1064,21 +1063,14 @@ mod tests {
         jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
+        let mut encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
-        let s = format!(
-            "{}.{}.{}.{}.{}",
-            encrypted_jwe.part(0).unwrap(),
-            encrypted_jwe.part(1).unwrap(),
-            encrypted_jwe.part(2).unwrap(),
-            base64::encode_config(vec![0u8; 32], base64::URL_SAFE_NO_PAD),
-            encrypted_jwe.part(4).unwrap()
-        );
+        encrypted_jwe.encrypted_payload = vec![0u8; 32];
 
-        let encrypted_jwe = Compact::decode(&s);
+        // Decrypt
         let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
-            &encrypted_jwe,
+            encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM,
@@ -1106,21 +1098,14 @@ mod tests {
         jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
+        let mut encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
-        let s = format!(
-            "{}.{}.{}.{}.{}",
-            encrypted_jwe.part(0).unwrap(),
-            encrypted_jwe.part(1).unwrap(),
-            base64::encode_config(vec![0u8; 96 / 8], base64::URL_SAFE_NO_PAD),
-            encrypted_jwe.part(3).unwrap(),
-            encrypted_jwe.part(4).unwrap()
-        );
+        encrypted_jwe.iv = vec![0u8; 96 / 8];
 
-        let encrypted_jwe = Compact::decode(&s);
+        // Decrypt
         let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
-            &encrypted_jwe,
+            encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM,
