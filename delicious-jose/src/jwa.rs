@@ -5,12 +5,7 @@
 //! Typically, you will not use these directly, but as part of a JWS or JWE.
 
 use std::fmt;
-use std::num::NonZeroU32;
 
-use ::hmac::Hmac;
-use aes::cipher::{Block, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
-use cipher::block_padding::Pkcs7;
-use cipher::BlockSizeUser;
 use once_cell::sync::Lazy;
 use ring::constant_time::verify_slices_are_equal;
 use ring::rand::SystemRandom;
@@ -26,6 +21,14 @@ use crate::jws::Secret;
 use crate::Empty;
 
 pub use ring::rand::SecureRandom;
+
+mod kma {
+    pub mod pbes2_aes_kw;
+}
+mod cea {
+    pub mod aes_cbc_hmac_sha;
+}
+use kma::pbes2_aes_kw::{KeyManagementAlgorithmPBES2, PBES2};
 
 /// AES GCM Tag Size, in bytes
 const AES_GCM_TAG_SIZE: usize = 128 / 8;
@@ -179,49 +182,26 @@ pub enum KeyManagementAlgorithm {
     PBES2_HS512_A256KW,
 }
 
-/// Algorithms for key management as defined in [RFC7518#4.7](https://tools.ietf.org/html/rfc7518#section-4.7)
-#[derive(Debug, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
-#[allow(non_camel_case_types)]
-pub enum KeyManagementAlgorithmAESGCM {
-    /// Key wrapping with AES GCM using 128-bit key alg
-    A128GCMKW,
-    /// Key wrapping with AES GCM using 192-bit key alg.
-    /// This is [not supported](https://github.com/briansmith/ring/issues/112) by `ring`.
-    A192GCMKW,
-    /// Key wrapping with AES GCM using 256-bit key alg
-    A256GCMKW,
-}
+// /// Algorithms for key management as defined in [RFC7518#4.7](https://tools.ietf.org/html/rfc7518#section-4.7)
+// #[derive(Debug, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
+// #[allow(non_camel_case_types)]
+// pub enum KeyManagementAlgorithmAESGCM {
+//     /// Key wrapping with AES GCM using 128-bit key alg
+//     A128GCMKW,
+//     /// Key wrapping with AES GCM using 192-bit key alg.
+//     /// This is [not supported](https://github.com/briansmith/ring/issues/112) by `ring`.
+//     A192GCMKW,
+//     /// Key wrapping with AES GCM using 256-bit key alg
+//     A256GCMKW,
+// }
 
-/// Algorithms for key management as defined in [RFC7518#4.7](https://tools.ietf.org/html/rfc7518#section-4.7)
-#[allow(non_camel_case_types)]
-pub struct AESGCM {
-    pub kma: KeyManagementAlgorithmAESGCM,
-    pub iv: Vec<u8>,
-    pub tag: Vec<u8>,
-}
-
-/// Algorithms for key management as defined in [RFC7518#4.8](https://tools.ietf.org/html/rfc7518#section-4.8)
-#[derive(Debug, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
-#[allow(non_camel_case_types)]
-pub enum KeyManagementAlgorithmPBES2 {
-    /// PBES2 with HMAC SHA-256 and "A128KW" wrapping
-    #[serde(rename = "PBES2-HS256+A128KW")]
-    PBES2_HS256_A128KW,
-    /// PBES2 with HMAC SHA-384 and "A192KW" wrapping
-    #[serde(rename = "PBES2-HS384+A192KW")]
-    PBES2_HS384_A192KW,
-    /// PBES2 with HMAC SHA-512 and "A256KW" wrapping
-    #[serde(rename = "PBES2-HS512+A256KW")]
-    PBES2_HS512_A256KW,
-}
-
-/// Algorithms for key management as defined in [RFC7518#4.8](https://tools.ietf.org/html/rfc7518#section-4.8)
-#[allow(non_camel_case_types)]
-pub struct PBES2 {
-    pub kma: KeyManagementAlgorithmPBES2,
-    pub salt: String,
-    pub count: u32,
-}
+// /// Algorithms for key management as defined in [RFC7518#4.7](https://tools.ietf.org/html/rfc7518#section-4.7)
+// #[allow(non_camel_case_types)]
+// pub struct AESGCM {
+//     pub kma: KeyManagementAlgorithmAESGCM,
+//     pub iv: Vec<u8>,
+//     pub tag: Vec<u8>,
+// }
 
 /// Describes the type of operations that the key management algorithm
 /// supports with respect to a Content Encryption Key (CEK)
@@ -767,197 +747,6 @@ impl KeyManagementAlgorithm {
     }
 }
 
-impl PBES2 {
-    fn encrypt(self, payload: &[u8], key: &[u8]) -> Result<Vec<u8>, Error> {
-        use KeyManagementAlgorithmPBES2::{
-            PBES2_HS256_A128KW, PBES2_HS384_A192KW, PBES2_HS512_A256KW,
-        };
-
-        use ring::pbkdf2;
-        let alg = match self.kma {
-            PBES2_HS256_A128KW => pbkdf2::PBKDF2_HMAC_SHA256,
-            PBES2_HS384_A192KW => pbkdf2::PBKDF2_HMAC_SHA384,
-            PBES2_HS512_A256KW => pbkdf2::PBKDF2_HMAC_SHA512,
-        };
-        let len = match self.kma {
-            PBES2_HS256_A128KW => 128 / 8,
-            PBES2_HS384_A192KW => 192 / 8,
-            PBES2_HS512_A256KW => 256 / 8,
-        };
-        let count = NonZeroU32::new(self.count).ok_or(Error::UnspecifiedCryptographicError)?;
-
-        // compute salt
-        let mut salt = match self.kma {
-            PBES2_HS256_A128KW => b"PBES2-HS256+A128KW".to_vec(),
-            PBES2_HS384_A192KW => b"PBES2-HS384+A192KW".to_vec(),
-            PBES2_HS512_A256KW => b"PBES2-HS512+A256KW".to_vec(),
-        };
-        salt.push(0);
-        base64::decode_config_buf(self.salt, base64::URL_SAFE_NO_PAD, &mut salt)?;
-
-        let mut dk = [0; 32];
-        pbkdf2::derive(alg, count, &salt, key, &mut dk[..len]);
-
-        let len = (payload.len() + 7) / 8;
-        let mut out = vec![0; len * 8 + 8];
-        out[8..][..payload.len()].copy_from_slice(payload);
-
-        match self.kma {
-            PBES2_HS256_A128KW => block_cipher_key_wrap::<aes::Aes128Enc>(&dk[..16], &mut out)?,
-            PBES2_HS384_A192KW => block_cipher_key_wrap::<aes::Aes192Enc>(&dk[..24], &mut out)?,
-            PBES2_HS512_A256KW => block_cipher_key_wrap::<aes::Aes256Enc>(&dk, &mut out)?,
-        }
-
-        Ok(out)
-    }
-
-    fn decrypt(self, encrypted: &[u8], key: &[u8]) -> Result<jwk::JWK<Empty>, Error> {
-        use KeyManagementAlgorithmPBES2::{
-            PBES2_HS256_A128KW, PBES2_HS384_A192KW, PBES2_HS512_A256KW,
-        };
-
-        use ring::pbkdf2;
-        let alg = match self.kma {
-            PBES2_HS256_A128KW => pbkdf2::PBKDF2_HMAC_SHA256,
-            PBES2_HS384_A192KW => pbkdf2::PBKDF2_HMAC_SHA384,
-            PBES2_HS512_A256KW => pbkdf2::PBKDF2_HMAC_SHA512,
-        };
-        let len = match self.kma {
-            PBES2_HS256_A128KW => 128 / 8,
-            PBES2_HS384_A192KW => 192 / 8,
-            PBES2_HS512_A256KW => 256 / 8,
-        };
-        let count = NonZeroU32::new(self.count).ok_or(Error::UnspecifiedCryptographicError)?;
-
-        // compute salt
-        let mut salt = match self.kma {
-            PBES2_HS256_A128KW => b"PBES2-HS256+A128KW".to_vec(),
-            PBES2_HS384_A192KW => b"PBES2-HS384+A192KW".to_vec(),
-            PBES2_HS512_A256KW => b"PBES2-HS512+A256KW".to_vec(),
-        };
-        salt.push(0);
-        base64::decode_config_buf(self.salt, base64::URL_SAFE_NO_PAD, &mut salt)?;
-
-        let mut dk = [0; 32];
-        pbkdf2::derive(alg, count, &salt, key, &mut dk[..len]);
-
-        let len = (encrypted.len() + 7) / 8;
-        let mut out = vec![0; len * 8 + 8];
-        out[8..][..encrypted.len()].copy_from_slice(encrypted);
-
-        match self.kma {
-            PBES2_HS256_A128KW => block_cipher_key_unwrap::<aes::Aes128Dec>(&dk[..16], &mut out)?,
-            PBES2_HS384_A192KW => block_cipher_key_unwrap::<aes::Aes192Dec>(&dk[..24], &mut out)?,
-            PBES2_HS512_A256KW => block_cipher_key_unwrap::<aes::Aes256Dec>(&dk, &mut out)?,
-        }
-
-        Ok(jwk::JWK {
-            algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
-                value: out,
-                key_type: Default::default(),
-            }),
-            common: jwk::CommonParameters {
-                public_key_use: Some(jwk::PublicKeyUse::Encryption),
-                algorithm: None,
-                ..Default::default()
-            },
-            additional: Default::default(),
-        })
-    }
-}
-
-const AES_KW_IV: u64 = 0xA6A6A6A6A6A6A6A6_u64;
-/// AES key wrap in-place (https://www.rfc-editor.org/rfc/rfc3394#section-2.2.1)
-///
-/// Implementation is intended for AES128/AES192/AES256 and will likely fail on any other ciphers
-fn block_cipher_key_wrap<T: cipher::KeyInit + BlockSizeUser + BlockEncryptMut + Clone>(
-    key: &[u8],
-    out: &mut [u8],
-) -> Result<(), Error> {
-    let cipher = T::new_from_slice(key)?;
-    let block_size = T::block_size();
-
-    let n = out.len() / 8 - 1;
-
-    let mut a = AES_KW_IV;
-    for j in 0..6 {
-        for i in 1..=n {
-            let ri = &mut out[i * 8..i * 8 + 8];
-
-            // A | R[i]
-            let mut input = [0; 32];
-            input[..8].copy_from_slice(&a.to_be_bytes());
-            input[8..16].copy_from_slice(ri);
-
-            let mut out2 = [0u64; 4];
-            let out_block = bytemuck::cast_slice_mut(&mut out2);
-
-            // B = AES(K, A | R[i])
-            let in_block = Block::<T>::from_slice(&input[..block_size]);
-            let out_block = Block::<T>::from_mut_slice(&mut out_block[..block_size]);
-            cipher.clone().encrypt_block_b2b_mut(in_block, out_block);
-
-            // A = MSB(64, B) ^ t where t = (n*j)+i
-            let t = n * j + i;
-            a = out2[0].to_be() ^ t as u64;
-
-            // R[i] = LSB(64, B)
-            let lsb = block_size / 8;
-            let lsb = lsb - 1..lsb;
-            ri.copy_from_slice(bytemuck::cast_slice(&out2[lsb]))
-        }
-    }
-    // Set C[0] = A
-    out[..8].copy_from_slice(&a.to_be_bytes());
-    Ok(())
-}
-
-/// AES key unwrap in-place (https://www.rfc-editor.org/rfc/rfc3394#section-2.2.2)
-///
-/// Implementation is intended for AES128/AES192/AES256 and will likely fail on any other ciphers
-fn block_cipher_key_unwrap<T: cipher::KeyInit + BlockSizeUser + BlockDecryptMut + Clone>(
-    key: &[u8],
-    out: &mut [u8],
-) -> Result<(), Error> {
-    let cipher = T::new_from_slice(key)?;
-    let block_size = T::block_size();
-
-    let n = out.len() / 8 - 1;
-
-    let mut a = u64::from_be_bytes(out[..8].try_into().unwrap());
-    for j in (0..6).rev() {
-        for i in (1..=n).rev() {
-            let ri = &mut out[i * 8..i * 8 + 8];
-
-            // (A ^ t) | R[i] where t = (n*j)+i
-            let mut input = [0; 32];
-            let t = n * j + i;
-            input[..8].copy_from_slice(&(a ^ t as u64).to_be_bytes());
-            input[8..16].copy_from_slice(ri);
-
-            let mut out2 = [0u64; 4];
-            let out_block = bytemuck::cast_slice_mut(&mut out2);
-
-            // B = AES-1(K, (A ^ t) | R[i])
-            let in_block = Block::<T>::from_slice(&input[..block_size]);
-            let out_block2 = Block::<T>::from_mut_slice(&mut out_block[..block_size]);
-            cipher.clone().decrypt_block_b2b_mut(in_block, out_block2);
-
-            // A = MSB(64, B)
-            a = out2[0].to_be();
-
-            // R[i] = LSB(64, B)
-            let lsb = block_size / 8;
-            let lsb = lsb - 1..lsb;
-            ri.copy_from_slice(bytemuck::cast_slice(&out2[lsb]))
-        }
-    }
-    if a != AES_KW_IV {
-        return Err(Error::UnspecifiedCryptographicError);
-    }
-    Ok(())
-}
-
 impl ContentEncryptionAlgorithm {
     /// Convenience function to generate a new random key with the required length
     pub fn generate_key(self) -> Result<Vec<u8>, Error> {
@@ -1066,51 +855,6 @@ impl ContentEncryptionAlgorithm {
         };
         aes_gcm_decrypt(algorithm, encrypted, key)
     }
-
-    fn aes_cbc_encrypt<T: Serialize + DeserializeOwned>(
-        self,
-        payload: &[u8],
-        aad: &[u8],
-        key: &jwk::JWK<T>,
-        options: &EncryptionOptions,
-    ) -> Result<EncryptionResult, Error> {
-        use self::ContentEncryptionAlgorithm::{A128CBC_HS256, A192CBC_HS384, A256CBC_HS512};
-
-        let algorithm = match self {
-            A128CBC_HS256 => AES_CBC_HMAC_SHA::A128CBC_HS256,
-            A192CBC_HS384 => AES_CBC_HMAC_SHA::A192CBC_HS384,
-            A256CBC_HS512 => AES_CBC_HMAC_SHA::A256CBC_HS512,
-            _ => Err(Error::UnsupportedOperation)?,
-        };
-
-        let nonce = match *options {
-            EncryptionOptions::AES_CBC_HMAC_SHA { ref nonce } => Ok(nonce),
-            ref others => Err(unexpected_encryption_options_error!(
-                AES_CBC_HMAC_SHA_ZEROED_NONCE,
-                others
-            )),
-        }?;
-
-        let key = key.algorithm.octet_key()?;
-        aes_cbc_sha2_encrypt(algorithm, payload, nonce.as_slice(), aad, key)
-    }
-
-    fn aes_cbc_decrypt<T: Serialize + DeserializeOwned>(
-        self,
-        encrypted: &EncryptionResult,
-        key: &jwk::JWK<T>,
-    ) -> Result<Vec<u8>, Error> {
-        use self::ContentEncryptionAlgorithm::{A128CBC_HS256, A192CBC_HS384, A256CBC_HS512};
-
-        let algorithm = match self {
-            A128CBC_HS256 => AES_CBC_HMAC_SHA::A128CBC_HS256,
-            A192CBC_HS384 => AES_CBC_HMAC_SHA::A192CBC_HS384,
-            A256CBC_HS512 => AES_CBC_HMAC_SHA::A256CBC_HS512,
-            _ => Err(Error::UnsupportedOperation)?,
-        };
-        let key = key.algorithm.octet_key()?;
-        aes_cbc_sha2_decrypt(algorithm, encrypted, key)
-    }
 }
 
 /// Encrypt a payload with AES GCM
@@ -1163,158 +907,6 @@ fn aes_gcm_decrypt(
         &mut in_out,
     )?;
     Ok(plaintext.to_vec())
-}
-
-#[derive(Copy, Clone)]
-#[allow(non_camel_case_types)]
-enum AES_CBC_HMAC_SHA {
-    /// aes cbc mode
-    A128CBC_HS256,
-    /// aes cbc mode
-    A192CBC_HS384,
-    /// aes cbc mode
-    A256CBC_HS512,
-}
-
-impl AES_CBC_HMAC_SHA {
-    fn key_len(self) -> usize {
-        match self {
-            Self::A128CBC_HS256 => 16,
-            Self::A192CBC_HS384 => 24,
-            Self::A256CBC_HS512 => 32,
-        }
-    }
-    fn hmac(self, key: &[u8], parts: [&[u8]; 4]) -> Result<Vec<u8>, ::digest::InvalidLength> {
-        use ::hmac::Mac;
-        let len = self.key_len();
-        Ok(match self {
-            Self::A128CBC_HS256 => {
-                let mut mac = Hmac::<sha2::Sha256>::new_from_slice(key)?;
-                parts.into_iter().for_each(|c| mac.update(c));
-                mac.finalize().into_bytes()[..len].to_vec()
-            }
-            Self::A192CBC_HS384 => {
-                let mut mac = Hmac::<sha2::Sha384>::new_from_slice(key)?;
-                parts.into_iter().for_each(|c| mac.update(c));
-                mac.finalize().into_bytes()[..len].to_vec()
-            }
-            Self::A256CBC_HS512 => {
-                let mut mac = Hmac::<sha2::Sha512>::new_from_slice(key)?;
-                parts.into_iter().for_each(|c| mac.update(c));
-                mac.finalize().into_bytes()[..len].to_vec()
-            }
-        })
-    }
-    fn hmac_validate(self, key: &[u8], parts: [&[u8]; 4], tag: &[u8]) -> Result<(), Error> {
-        use ::hmac::Mac;
-        match self {
-            Self::A128CBC_HS256 => {
-                let mut mac = Hmac::<sha2::Sha256>::new_from_slice(key)?;
-                parts.into_iter().for_each(|c| mac.update(c));
-                mac.verify_truncated_left(tag)?
-            }
-            Self::A192CBC_HS384 => {
-                let mut mac = Hmac::<sha2::Sha384>::new_from_slice(key)?;
-                parts.into_iter().for_each(|c| mac.update(c));
-                mac.verify_truncated_left(tag)?
-            }
-            Self::A256CBC_HS512 => {
-                let mut mac = Hmac::<sha2::Sha512>::new_from_slice(key)?;
-                parts.into_iter().for_each(|c| mac.update(c));
-                mac.verify_truncated_left(tag)?
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Encrypt a payload with AES GCM
-fn aes_cbc_sha2_encrypt(
-    alg: AES_CBC_HMAC_SHA,
-    payload: &[u8],
-    nonce: &[u8],
-    aad: &[u8],
-    key: &[u8],
-) -> Result<EncryptionResult, Error> {
-    use AES_CBC_HMAC_SHA::{A128CBC_HS256, A192CBC_HS384, A256CBC_HS512};
-
-    let len = alg.key_len();
-    if key.len() != len * 2 {
-        return Err(Error::UnspecifiedCryptographicError);
-    }
-
-    let (mac_key, enc_key) = key.split_at(len);
-
-    // encrypt the payload using aes-cbc
-    let encrypted = match alg {
-        A128CBC_HS256 => cbc::Encryptor::<aes::Aes128>::new_from_slices(enc_key, nonce)?
-            .encrypt_padded_vec_mut::<Pkcs7>(payload),
-        A192CBC_HS384 => cbc::Encryptor::<aes::Aes192>::new_from_slices(enc_key, nonce)?
-            .encrypt_padded_vec_mut::<Pkcs7>(payload),
-        A256CBC_HS512 => cbc::Encryptor::<aes::Aes256>::new_from_slices(enc_key, nonce)?
-            .encrypt_padded_vec_mut::<Pkcs7>(payload),
-    };
-
-    // compute the hmac
-    let al = (aad.len() as u64 * 8).to_be_bytes();
-    let parts = [aad, nonce, encrypted.as_slice(), al.as_slice()];
-
-    let tag = alg.hmac(mac_key, parts)?;
-
-    Ok(EncryptionResult {
-        nonce: nonce.to_vec(),
-        encrypted,
-        tag,
-        additional_data: aad.to_vec(),
-    })
-}
-
-/// Decrypts a payload with AES GCM
-fn aes_cbc_sha2_decrypt(
-    alg: AES_CBC_HMAC_SHA,
-    encrypted: &EncryptionResult,
-    key: &[u8],
-) -> Result<Vec<u8>, Error> {
-    use AES_CBC_HMAC_SHA::{A128CBC_HS256, A192CBC_HS384, A256CBC_HS512};
-
-    let EncryptionResult {
-        nonce,
-        encrypted,
-        tag,
-        additional_data: aad,
-    } = encrypted;
-
-    let len = match alg {
-        A128CBC_HS256 => 16,
-        A192CBC_HS384 => 24,
-        A256CBC_HS512 => 32,
-    };
-
-    if key.len() != len * 2 {
-        return Err(Error::UnspecifiedCryptographicError);
-    }
-    let (mac_key, enc_key) = key.split_at(len);
-
-    // compute the hmac
-    let al = (aad.len() as u64 * 8).to_be_bytes();
-    let parts = [
-        aad.as_slice(),
-        nonce.as_slice(),
-        encrypted.as_slice(),
-        al.as_slice(),
-    ];
-
-    alg.hmac_validate(mac_key, parts, tag)?;
-
-    let decrypted = match alg {
-        A128CBC_HS256 => cbc::Decryptor::<aes::Aes128>::new_from_slices(enc_key, nonce)?
-            .decrypt_padded_vec_mut::<Pkcs7>(encrypted)?,
-        A192CBC_HS384 => cbc::Decryptor::<aes::Aes192>::new_from_slices(enc_key, nonce)?
-            .decrypt_padded_vec_mut::<Pkcs7>(encrypted)?,
-        A256CBC_HS512 => cbc::Decryptor::<aes::Aes256>::new_from_slices(enc_key, nonce)?
-            .decrypt_padded_vec_mut::<Pkcs7>(encrypted)?,
-    };
-    Ok(decrypted)
 }
 
 pub(crate) fn random_aes_gcm_nonce() -> Result<Vec<u8>, Error> {
@@ -1979,239 +1571,5 @@ mod tests {
 
         let decrypted_payload = not_err!(enc_alg.decrypt(&encrypted_payload, &key));
         assert!(verify_slices_are_equal(payload.as_bytes(), &decrypted_payload).is_ok());
-    }
-
-    #[test]
-    fn aescbc_hmacsha() {
-        struct Test {
-            alg: AES_CBC_HMAC_SHA,
-            key: &'static [u8],
-            enc: [u8; 144],
-            tag: &'static [u8],
-        }
-
-        use hex_literal::hex;
-        // from https://datatracker.ietf.org/doc/html/rfc7518#appendix-B
-        let tests = [
-            Test {
-                alg: AES_CBC_HMAC_SHA::A128CBC_HS256,
-                key: &hex!(
-                    "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
-                    "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"
-                ),
-                enc: hex!(
-                    "c8 0e df a3 2d df 39 d5 ef 00 c0 b4 68 83 42 79"
-                    "a2 e4 6a 1b 80 49 f7 92 f7 6b fe 54 b9 03 a9 c9"
-                    "a9 4a c9 b4 7a d2 65 5c 5f 10 f9 ae f7 14 27 e2"
-                    "fc 6f 9b 3f 39 9a 22 14 89 f1 63 62 c7 03 23 36"
-                    "09 d4 5a c6 98 64 e3 32 1c f8 29 35 ac 40 96 c8"
-                    "6e 13 33 14 c5 40 19 e8 ca 79 80 df a4 b9 cf 1b"
-                    "38 4c 48 6f 3a 54 c5 10 78 15 8e e5 d7 9d e5 9f"
-                    "bd 34 d8 48 b3 d6 95 50 a6 76 46 34 44 27 ad e5"
-                    "4b 88 51 ff b5 98 f7 f8 00 74 b9 47 3c 82 e2 db"
-                ),
-                tag: &hex!("65 2c 3f a3 6b 0a 7c 5b 32 19 fa b3 a3 0b c1 c4"),
-            },
-            Test {
-                alg: AES_CBC_HMAC_SHA::A192CBC_HS384,
-                key: &hex!(
-                    "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
-                    "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"
-                    "20 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f"
-                ),
-                enc: hex!(
-                    "ea 65 da 6b 59 e6 1e db 41 9b e6 2d 19 71 2a e5"
-                    "d3 03 ee b5 00 52 d0 df d6 69 7f 77 22 4c 8e db"
-                    "00 0d 27 9b dc 14 c1 07 26 54 bd 30 94 42 30 c6"
-                    "57 be d4 ca 0c 9f 4a 84 66 f2 2b 22 6d 17 46 21"
-                    "4b f8 cf c2 40 0a dd 9f 51 26 e4 79 66 3f c9 0b"
-                    "3b ed 78 7a 2f 0f fc bf 39 04 be 2a 64 1d 5c 21"
-                    "05 bf e5 91 ba e2 3b 1d 74 49 e5 32 ee f6 0a 9a"
-                    "c8 bb 6c 6b 01 d3 5d 49 78 7b cd 57 ef 48 49 27"
-                    "f2 80 ad c9 1a c0 c4 e7 9c 7b 11 ef c6 00 54 e3"
-                ),
-                tag: &hex!(
-                    "84 90 ac 0e 58 94 9b fe 51 87 5d 73 3f 93 ac 20"
-                    "75 16 80 39 cc c7 33 d7"
-                ),
-            },
-            Test {
-                alg: AES_CBC_HMAC_SHA::A256CBC_HS512,
-                key: &hex!(
-                    "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
-                    "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"
-                    "20 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f"
-                    "30 31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f"
-                ),
-                enc: hex!(
-                    "4a ff aa ad b7 8c 31 c5 da 4b 1b 59 0d 10 ff bd"
-                    "3d d8 d5 d3 02 42 35 26 91 2d a0 37 ec bc c7 bd"
-                    "82 2c 30 1d d6 7c 37 3b cc b5 84 ad 3e 92 79 c2"
-                    "e6 d1 2a 13 74 b7 7f 07 75 53 df 82 94 10 44 6b"
-                    "36 eb d9 70 66 29 6a e6 42 7e a7 5c 2e 08 46 a1"
-                    "1a 09 cc f5 37 0d c8 0b fe cb ad 28 c7 3f 09 b3"
-                    "a3 b7 5e 66 2a 25 94 41 0a e4 96 b2 e2 e6 60 9e"
-                    "31 e6 e0 2c c8 37 f0 53 d2 1f 37 ff 4f 51 95 0b"
-                    "be 26 38 d0 9d d7 a4 93 09 30 80 6d 07 03 b1 f6"
-                ),
-                tag: &hex!(
-                    "4d d3 b4 c0 88 a7 f4 5c 21 68 39 64 5b 20 12 bf"
-                    "2e 62 69 a8 c5 6a 81 6d bc 1b 26 77 61 95 5b c5"
-                ),
-            },
-        ];
-
-        let payload = hex!(
-            "41 20 63 69 70 68 65 72 20 73 79 73 74 65 6d 20"
-            "6d 75 73 74 20 6e 6f 74 20 62 65 20 72 65 71 75"
-            "69 72 65 64 20 74 6f 20 62 65 20 73 65 63 72 65"
-            "74 2c 20 61 6e 64 20 69 74 20 6d 75 73 74 20 62"
-            "65 20 61 62 6c 65 20 74 6f 20 66 61 6c 6c 20 69"
-            "6e 74 6f 20 74 68 65 20 68 61 6e 64 73 20 6f 66"
-            "20 74 68 65 20 65 6e 65 6d 79 20 77 69 74 68 6f"
-            "75 74 20 69 6e 63 6f 6e 76 65 6e 69 65 6e 63 65"
-        );
-        let iv = hex!("1a f3 8c 2d c2 b9 6f fd d8 66 94 09 23 41 bc 04");
-        let aad = hex!(
-            "54 68 65 20 73 65 63 6f 6e 64 20 70 72 69 6e 63"
-            "69 70 6c 65 20 6f 66 20 41 75 67 75 73 74 65 20"
-            "4b 65 72 63 6b 68 6f 66 66 73"
-        );
-
-        for test in tests {
-            let res = aes_cbc_sha2_encrypt(test.alg, &payload, &iv, &aad, test.key).unwrap();
-
-            assert_eq!(res.encrypted, test.enc);
-            assert_eq!(res.tag, test.tag);
-
-            let res = aes_cbc_sha2_decrypt(test.alg, &res, test.key).unwrap();
-
-            assert_eq!(res, payload);
-        }
-    }
-
-    #[test]
-    fn aes128_keywrapping_128() {
-        let kek = hex_literal::hex!("000102030405060708090A0B0C0D0E0F");
-        let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF");
-
-        let mut out = [0; 8 + 16];
-        out[8..].copy_from_slice(&data);
-        block_cipher_key_wrap::<aes::Aes128Enc>(&kek, &mut out).unwrap();
-
-        assert_eq!(
-            out,
-            hex_literal::hex!("1FA68B0A8112B447 AEF34BD8FB5A7B82 9D3E862371D2CFE5")
-        );
-
-        block_cipher_key_unwrap::<aes::Aes128Dec>(&kek, &mut out).unwrap();
-
-        assert_eq!(out[8..], data);
-    }
-
-    #[test]
-    fn aes192_keywrapping_128() {
-        let kek = hex_literal::hex!("000102030405060708090A0B0C0D0E0F1011121314151617");
-        let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF");
-
-        let mut out = [0; 8 + 16];
-        out[8..].copy_from_slice(&data);
-        block_cipher_key_wrap::<aes::Aes192Enc>(&kek, &mut out).unwrap();
-
-        assert_eq!(
-            out,
-            hex_literal::hex!("96778B25AE6CA435 F92B5B97C050AED2 468AB8A17AD84E5D")
-        );
-
-        block_cipher_key_unwrap::<aes::Aes192Dec>(&kek, &mut out).unwrap();
-
-        assert_eq!(out[8..], data);
-    }
-
-    #[test]
-    fn aes256_keywrapping_128() {
-        let kek =
-            hex_literal::hex!("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
-        let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF");
-
-        let mut out = [0; 8 + 16];
-        out[8..].copy_from_slice(&data);
-        block_cipher_key_wrap::<aes::Aes256Enc>(&kek, &mut out).unwrap();
-
-        assert_eq!(
-            out,
-            hex_literal::hex!("64E8C3F9CE0F5BA2 63E9777905818A2A 93C8191E7D6E8AE7")
-        );
-
-        block_cipher_key_unwrap::<aes::Aes256Dec>(&kek, &mut out).unwrap();
-
-        assert_eq!(out[8..], data);
-    }
-
-    #[test]
-    fn aes192_keywrapping_192() {
-        let kek = hex_literal::hex!("000102030405060708090A0B0C0D0E0F1011121314151617");
-        let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF0001020304050607");
-
-        let mut out = [0; 8 + 24];
-        out[8..].copy_from_slice(&data);
-        block_cipher_key_wrap::<aes::Aes192Enc>(&kek, &mut out).unwrap();
-
-        assert_eq!(
-            out,
-            hex_literal::hex!(
-                "031D33264E15D332 68F24EC260743EDC E1C6C7DDEE725A93 6BA814915C6762D2"
-            )
-        );
-
-        block_cipher_key_unwrap::<aes::Aes192Dec>(&kek, &mut out).unwrap();
-
-        assert_eq!(out[8..], data);
-    }
-
-    #[test]
-    fn aes256_keywrapping_192() {
-        let kek =
-            hex_literal::hex!("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
-        let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF0001020304050607");
-
-        let mut out = [0; 8 + 24];
-        out[8..].copy_from_slice(&data);
-        block_cipher_key_wrap::<aes::Aes256Enc>(&kek, &mut out).unwrap();
-
-        assert_eq!(
-            out,
-            hex_literal::hex!(
-                "A8F9BC1612C68B3F F6E6F4FBE30E71E4 769C8B80A32CB895 8CD5D17D6B254DA1"
-            )
-        );
-
-        block_cipher_key_unwrap::<aes::Aes256Dec>(&kek, &mut out).unwrap();
-
-        assert_eq!(out[8..], data);
-    }
-
-    #[test]
-    fn aes256_keywrapping_256() {
-        let kek =
-            hex_literal::hex!("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
-        let data =
-            hex_literal::hex!("00112233445566778899AABBCCDDEEFF000102030405060708090A0B0C0D0E0F");
-
-        let mut out = [0; 8 + 32];
-        out[8..].copy_from_slice(&data);
-        block_cipher_key_wrap::<aes::Aes256Enc>(&kek, &mut out).unwrap();
-
-        assert_eq!(
-            out,
-            hex_literal::hex!(
-                "28C9F404C4B810F4 CBCCB35CFB87F826 3F5786E2D80ED326
-            CBC7F0E71A99F43B FB988B9B7A02DD21"
-            )
-        );
-
-        block_cipher_key_unwrap::<aes::Aes256Dec>(&kek, &mut out).unwrap();
-
-        assert_eq!(out[8..], data);
     }
 }
