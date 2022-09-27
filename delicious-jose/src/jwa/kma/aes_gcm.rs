@@ -1,9 +1,7 @@
-use crate::{
-    errors::Error,
-    jwa::{EncryptionResult, KeyManagementAlgorithm},
-    jwk, Empty,
-};
+use crate::{errors::Error, jwa::EncryptionResult, jwk, Empty};
 use ring::aead;
+
+use super::KeyManagementAlgorithm;
 
 impl KeyManagementAlgorithm {
     pub(crate) fn aes_gcm_encrypt(
@@ -101,9 +99,15 @@ pub(crate) fn aes_gcm_decrypt(
 
 #[cfg(test)]
 mod tests {
-    use ring::rand::{SecureRandom, SystemRandom};
+    use ring::{
+        constant_time::verify_slices_are_equal,
+        rand::{SecureRandom, SystemRandom},
+    };
 
-    use crate::jwa::{random_aes_gcm_nonce, AES_GCM_NONCE_LENGTH};
+    use crate::{
+        jwa::{random_aes_gcm_nonce, AES_GCM_NONCE_LENGTH},
+        jwe::CekAlgorithmHeader,
+    };
 
     use super::*;
     #[test]
@@ -178,5 +182,69 @@ mod tests {
 
         let payload = not_err!(String::from_utf8(decrypted));
         assert_eq!(payload, PAYLOAD);
+    }
+
+    fn random_key(length: usize) -> Vec<u8> {
+        let mut key: Vec<u8> = vec![0; length];
+        SystemRandom::new().fill(&mut key).unwrap();
+        key
+    }
+
+    #[test]
+    fn aes128gcmkw_key_encryption_round_trip() {
+        let mut key: Vec<u8> = vec![0; 128 / 8];
+        not_err!(SystemRandom::new().fill(&mut key));
+
+        let key = jwk::JWK::<Empty> {
+            common: Default::default(),
+            additional: Default::default(),
+            algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
+                key_type: Default::default(),
+                value: key,
+            }),
+        };
+
+        let nonce = random_aes_gcm_nonce().unwrap();
+
+        let cek_alg = KeyManagementAlgorithm::A128GCMKW;
+        let cek = random_key(128 / 8);
+
+        let mut header = CekAlgorithmHeader {
+            nonce: Some(nonce),
+            ..Default::default()
+        };
+        let encrypted_cek = not_err!(cek_alg.wrap_key(&cek, &key, &mut header));
+        let decrypted_cek = not_err!(cek_alg.unwrap_key(&encrypted_cek, &mut header, &key));
+
+        assert!(verify_slices_are_equal(&cek, decrypted_cek.octet_key().unwrap(),).is_ok());
+    }
+
+    #[test]
+    fn aes256gcmkw_key_encryption_round_trip() {
+        let mut key: Vec<u8> = vec![0; 256 / 8];
+        not_err!(SystemRandom::new().fill(&mut key));
+
+        let key = jwk::JWK::<Empty> {
+            common: Default::default(),
+            additional: Default::default(),
+            algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
+                key_type: Default::default(),
+                value: key,
+            }),
+        };
+
+        let nonce = random_aes_gcm_nonce().unwrap();
+
+        let cek_alg = KeyManagementAlgorithm::A256GCMKW;
+        let cek = random_key(128 / 8);
+
+        let mut header = CekAlgorithmHeader {
+            nonce: Some(nonce),
+            ..Default::default()
+        };
+        let encrypted_cek = not_err!(cek_alg.wrap_key(&cek, &key, &mut header));
+        let decrypted_cek = not_err!(cek_alg.unwrap_key(&encrypted_cek, &mut header, &key));
+
+        assert!(verify_slices_are_equal(&cek, decrypted_cek.octet_key().unwrap(),).is_ok());
     }
 }
