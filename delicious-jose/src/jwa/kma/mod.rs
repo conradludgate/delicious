@@ -6,7 +6,8 @@ use super::{Algorithm, ContentEncryptionAlgorithm};
 
 pub mod aes_gcm;
 pub mod pbes2_aes_kw;
-use pbes2_aes_kw::{KeyManagementAlgorithmPBES2, PBES2};
+pub use pbes2_aes_kw::KMA_PBES2;
+use pbes2_aes_kw::PBES2;
 
 /// Algorithms for key management as defined in [RFC7518#4](https://tools.ietf.org/html/rfc7518#section-4)
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -42,12 +43,8 @@ pub enum KeyManagementAlgorithm {
     A192GCMKW,
     /// Key wrapping with AES GCM using 256-bit key alg
     A256GCMKW,
-    /// PBES2 with HMAC SHA-256 and "A128KW" wrapping
-    PBES2_HS256_A128KW,
-    /// PBES2 with HMAC SHA-384 and "A192KW" wrapping
-    PBES2_HS384_A192KW,
-    /// PBES2 with HMAC SHA-512 and "A256KW" wrapping
-    PBES2_HS512_A256KW,
+    /// PBES2 with HMAC SHA and AES key-wrapping
+    PBES2_HMAC_AES(KMA_PBES2),
 }
 
 impl Default for KeyManagementAlgorithm {
@@ -99,8 +96,7 @@ impl KeyManagementAlgorithm {
         use self::KeyManagementAlgorithm::*;
 
         match self {
-            A128KW | A192KW | A256KW | A128GCMKW | A192GCMKW | A256GCMKW | PBES2_HS256_A128KW
-            | PBES2_HS384_A192KW | PBES2_HS512_A256KW => {
+            A128KW | A192KW | A256KW | A128GCMKW | A192GCMKW | A256GCMKW | PBES2_HMAC_AES(_) => {
                 KeyManagementAlgorithmType::SymmetricKeyWrapping
             }
             RSA1_5 | RSA_OAEP | RSA_OAEP_256 => KeyManagementAlgorithmType::AsymmetricKeyEncryption,
@@ -169,8 +165,7 @@ impl KeyManagementAlgorithm {
         header: &mut CekAlgorithmHeader,
     ) -> Result<Vec<u8>, Error> {
         use self::KeyManagementAlgorithm::{
-            DirectSymmetricKey, A128GCMKW, A192GCMKW, A256GCMKW, PBES2_HS256_A128KW,
-            PBES2_HS384_A192KW, PBES2_HS512_A256KW,
+            DirectSymmetricKey, A128GCMKW, A192GCMKW, A256GCMKW, PBES2_HMAC_AES,
         };
 
         match self {
@@ -180,30 +175,12 @@ impl KeyManagementAlgorithm {
                 header.tag = Some(encrypted.tag);
                 Ok(encrypted.encrypted)
             }
-            PBES2_HS256_A128KW => {
+            PBES2_HMAC_AES(kma) => {
                 let key = key.algorithm.octet_key()?;
                 PBES2 {
-                    kma: KeyManagementAlgorithmPBES2::PBES2_HS256_A128KW,
+                    kma,
                     salt: header.salt.clone().ok_or(Error::UnsupportedOperation)?,
                     count: header.count.unwrap_or_default(),
-                }
-                .encrypt(payload, key)
-            }
-            PBES2_HS384_A192KW => {
-                let key = key.algorithm.octet_key()?;
-                PBES2 {
-                    kma: KeyManagementAlgorithmPBES2::PBES2_HS384_A192KW,
-                    salt: header.salt.take().unwrap_or_default(),
-                    count: header.count.take().unwrap_or_default(),
-                }
-                .encrypt(payload, key)
-            }
-            PBES2_HS512_A256KW => {
-                let key = key.algorithm.octet_key()?;
-                PBES2 {
-                    kma: KeyManagementAlgorithmPBES2::PBES2_HS512_A256KW,
-                    salt: header.salt.take().unwrap_or_default(),
-                    count: header.count.take().unwrap_or_default(),
                 }
                 .encrypt(payload, key)
             }
@@ -220,8 +197,7 @@ impl KeyManagementAlgorithm {
         key: &jwk::JWK<T>,
     ) -> Result<jwk::JWK<Empty>, Error> {
         use self::KeyManagementAlgorithm::{
-            DirectSymmetricKey, A128GCMKW, A192GCMKW, A256GCMKW, PBES2_HS256_A128KW,
-            PBES2_HS384_A192KW, PBES2_HS512_A256KW,
+            DirectSymmetricKey, A128GCMKW, A192GCMKW, A256GCMKW, PBES2_HMAC_AES,
         };
 
         match self {
@@ -238,28 +214,10 @@ impl KeyManagementAlgorithm {
                     key,
                 )
             }
-            PBES2_HS256_A128KW => {
+            PBES2_HMAC_AES(kma) => {
                 let key = key.algorithm.octet_key()?;
                 PBES2 {
-                    kma: KeyManagementAlgorithmPBES2::PBES2_HS256_A128KW,
-                    salt: header.salt.take().unwrap_or_default(),
-                    count: header.count.take().unwrap_or_default(),
-                }
-                .decrypt(encrypted, key)
-            }
-            PBES2_HS384_A192KW => {
-                let key = key.algorithm.octet_key()?;
-                PBES2 {
-                    kma: KeyManagementAlgorithmPBES2::PBES2_HS384_A192KW,
-                    salt: header.salt.take().unwrap_or_default(),
-                    count: header.count.take().unwrap_or_default(),
-                }
-                .decrypt(encrypted, key)
-            }
-            PBES2_HS512_A256KW => {
-                let key = key.algorithm.octet_key()?;
-                PBES2 {
-                    kma: KeyManagementAlgorithmPBES2::PBES2_HS512_A256KW,
+                    kma,
                     salt: header.salt.take().unwrap_or_default(),
                     count: header.count.take().unwrap_or_default(),
                 }
@@ -364,6 +322,8 @@ mod tests {
 }
 
 mod serde_impl {
+    use crate::jwa::kma::pbes2_aes_kw::KMA_PBES2;
+
     use super::KeyManagementAlgorithm;
 
     impl<'de> serde::Deserialize<'de> for KeyManagementAlgorithm {
@@ -406,15 +366,15 @@ mod serde_impl {
                         b"A128GCMKW" => Ok(Field(KeyManagementAlgorithm::A128GCMKW)),
                         b"A192GCMKW" => Ok(Field(KeyManagementAlgorithm::A192GCMKW)),
                         b"A256GCMKW" => Ok(Field(KeyManagementAlgorithm::A256GCMKW)),
-                        b"PBES2-HS256+A128KW" => {
-                            Ok(Field(KeyManagementAlgorithm::PBES2_HS256_A128KW))
-                        }
-                        b"PBES2-HS384+A192KW" => {
-                            Ok(Field(KeyManagementAlgorithm::PBES2_HS384_A192KW))
-                        }
-                        b"PBES2-HS512+A256KW" => {
-                            Ok(Field(KeyManagementAlgorithm::PBES2_HS512_A256KW))
-                        }
+                        b"PBES2-HS256+A128KW" => Ok(Field(KeyManagementAlgorithm::PBES2_HMAC_AES(
+                            KMA_PBES2::HS256_A128KW,
+                        ))),
+                        b"PBES2-HS384+A192KW" => Ok(Field(KeyManagementAlgorithm::PBES2_HMAC_AES(
+                            KMA_PBES2::HS384_A192KW,
+                        ))),
+                        b"PBES2-HS512+A256KW" => Ok(Field(KeyManagementAlgorithm::PBES2_HMAC_AES(
+                            KMA_PBES2::HS512_A256KW,
+                        ))),
                         _ => {
                             let value = String::from_utf8_lossy(value);
                             Err(serde::de::Error::unknown_variant(&value, VARIANTS))
@@ -494,9 +454,15 @@ mod serde_impl {
                 KeyManagementAlgorithm::A128GCMKW => (11u32, "A128GCMKW"),
                 KeyManagementAlgorithm::A192GCMKW => (12u32, "A192GCMKW"),
                 KeyManagementAlgorithm::A256GCMKW => (13u32, "A256GCMKW"),
-                KeyManagementAlgorithm::PBES2_HS256_A128KW => (14u32, "PBES2-HS256+A128KW"),
-                KeyManagementAlgorithm::PBES2_HS384_A192KW => (15u32, "PBES2-HS384+A192KW"),
-                KeyManagementAlgorithm::PBES2_HS512_A256KW => (16u32, "PBES2-HS512+A256KW"),
+                KeyManagementAlgorithm::PBES2_HMAC_AES(KMA_PBES2::HS256_A128KW) => {
+                    (14u32, "PBES2-HS256+A128KW")
+                }
+                KeyManagementAlgorithm::PBES2_HMAC_AES(KMA_PBES2::HS384_A192KW) => {
+                    (15u32, "PBES2-HS384+A192KW")
+                }
+                KeyManagementAlgorithm::PBES2_HMAC_AES(KMA_PBES2::HS512_A256KW) => {
+                    (16u32, "PBES2-HS512+A256KW")
+                }
             };
             serializer.serialize_unit_variant("KeyManagementAlgorithm", idx, name)
         }

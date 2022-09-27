@@ -25,7 +25,7 @@ mod kma;
 mod cea {
     pub mod aes_cbc_hmac_sha;
 }
-pub use kma::KeyManagementAlgorithm;
+pub use kma::{KeyManagementAlgorithm, KMA_PBES2};
 
 /// AES GCM Nonce length, in bytes
 const AES_GCM_NONCE_LENGTH: usize = 96 / 8;
