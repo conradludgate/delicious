@@ -1,4 +1,4 @@
-use crate::{errors::Error, jwa::EncryptionResult, jwk, Empty};
+use crate::{errors::Error, jwa::EncryptionResult, jwk};
 use ring::aead;
 
 /// Key wrapping with AES GCM. [RFC7518#4.7](https://tools.ietf.org/html/rfc7518#section-4.7)
@@ -42,7 +42,7 @@ impl AES_GCM {
         self,
         encrypted: &EncryptionResult,
         key: &[u8],
-    ) -> Result<jwk::JWK<Empty>, Error> {
+    ) -> Result<jwk::JWK<()>, Error> {
         use AES_GCM::{A128, A256};
 
         let algorithm = match self {
@@ -212,7 +212,7 @@ mod tests {
         let mut key: Vec<u8> = vec![0; 128 / 8];
         not_err!(SystemRandom::new().fill(&mut key));
 
-        let key = jwk::JWK::<Empty> {
+        let key = jwk::JWK::<()> {
             common: Default::default(),
             additional: Default::default(),
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
@@ -241,7 +241,7 @@ mod tests {
         let mut key: Vec<u8> = vec![0; 256 / 8];
         not_err!(SystemRandom::new().fill(&mut key));
 
-        let key = jwk::JWK::<Empty> {
+        let key = jwk::JWK::<()> {
             common: Default::default(),
             additional: Default::default(),
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {

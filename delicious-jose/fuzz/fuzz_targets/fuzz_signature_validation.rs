@@ -17,5 +17,5 @@ fuzz_target!(|data: &[u8]| {
     };
 
     let token = Compact::decode(token);
-    let _ = JWT::<serde_json::Value, delicious_jose::Empty>::decode(&token, &signing_secret, SignatureAlgorithm::HS256);
+    let _ = JWT::<serde_json::Value, delicious_jose::()>::decode(&token, &signing_secret, SignatureAlgorithm::HS256);
 });

@@ -5,8 +5,6 @@ use cipher::KeyInit;
 use std::num::NonZeroU32;
 
 use crate::errors::Error;
-use crate::jwk;
-use crate::Empty;
 
 /// PBES2 with HMAC SHA and AES key-wrapping. [RFC7518#4.8](https://tools.ietf.org/html/rfc7518#section-4.8)
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -80,7 +78,7 @@ impl PBES2 {
         key: &[u8],
         salt: &str,
         count: u32,
-    ) -> Result<jwk::JWK<Empty>, Error> {
+    ) -> Result<Vec<u8>, Error> {
         use PBES2::{HS256_A128KW, HS384_A192KW, HS512_A256KW};
 
         use ring::pbkdf2;
@@ -108,11 +106,9 @@ impl PBES2 {
         let mut dk = [0; 32];
         pbkdf2::derive(alg, count, &salt1, key, &mut dk[..len]);
 
-        dbg!(&dk);
-
         let len = (encrypted.len() + 7) / 8;
-        let mut out = vec![0; len * 8 + 8];
-        out[8..][..encrypted.len()].copy_from_slice(encrypted);
+        let mut out = vec![0; len * 8];
+        out[..encrypted.len()].copy_from_slice(encrypted);
 
         match self {
             HS256_A128KW => aes_key_unwrap(Aes128::new_from_slice(&dk[..16])?, &mut out)?,
@@ -120,18 +116,10 @@ impl PBES2 {
             HS512_A256KW => aes_key_unwrap(Aes256::new_from_slice(&dk)?, &mut out)?,
         }
 
-        Ok(jwk::JWK {
-            algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
-                value: out,
-                key_type: Default::default(),
-            }),
-            common: jwk::CommonParameters {
-                public_key_use: Some(jwk::PublicKeyUse::Encryption),
-                algorithm: None,
-                ..Default::default()
-            },
-            additional: Default::default(),
-        })
+        out.rotate_left(8);
+        out.truncate((len - 1) * 8);
+
+        Ok(out)
     }
 }
 
@@ -382,17 +370,23 @@ mod tests {
             ],
             base64::URL_SAFE_NO_PAD,
         );
-        let cek = PBES2::HS256_A128KW
+        let encrypted_cek = PBES2::HS256_A128KW
             .encrypt(&payload, key, &salt, 4096)
             .unwrap();
 
         assert_eq!(
-            cek,
+            encrypted_cek,
             [
                 78, 186, 151, 59, 11, 141, 81, 240, 213, 245, 83, 211, 53, 188, 134, 188, 66, 125,
                 36, 200, 222, 124, 5, 103, 249, 52, 117, 184, 140, 81, 246, 158, 161, 177, 20, 33,
                 245, 57, 59, 4
             ]
-        )
+        );
+
+        let decrypted_cek = PBES2::HS256_A128KW
+            .decrypt(&encrypted_cek, key, &salt, 4096)
+            .unwrap();
+
+        assert_eq!(decrypted_cek, payload);
     }
 }

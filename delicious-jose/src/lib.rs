@@ -37,7 +37,7 @@
     arithmetic_overflow,
     bad_style,
     const_err,
-    // dead_code,
+    dead_code,
     improper_ctypes,
     // missing_docs,
     mutable_transmutes,
@@ -75,7 +75,7 @@
 )]
 #![doc(test(attr(allow(unused_variables), deny(warnings))))]
 
-use std::borrow::Borrow;
+use std::borrow::{Borrow, Cow};
 use std::fmt::{self, Debug, Display};
 use std::iter;
 use std::ops::Deref;
@@ -107,6 +107,74 @@ pub mod jws;
 pub mod digest;
 
 use crate::errors::{Error, ValidationError};
+
+pub trait CompactPart: Sized {
+    fn from_bytes(b: &[u8]) -> Result<Self, Error>;
+    fn from_base64(b: &str) -> Result<Self, Error> {
+        let bytes = base64::decode_config(b, base64::URL_SAFE_NO_PAD)?;
+        Self::from_bytes(&bytes)
+    }
+    fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error>;
+    fn to_base64(&self) -> Result<Cow<'_, str>, Error> {
+        Ok(base64::encode_config(self.to_bytes()?, base64::URL_SAFE_NO_PAD).into())
+    }
+}
+
+pub struct Json<T>(pub T);
+
+impl<T: Serialize + DeserializeOwned> CompactPart for Json<T> {
+    fn from_bytes(b: &[u8]) -> Result<Self, Error> {
+        Ok(Json(serde_json::from_slice(b)?))
+    }
+
+    fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
+        Ok(serde_json::to_vec(&self.0)?.into())
+    }
+}
+
+impl CompactPart for Compact {
+    fn from_bytes(b: &[u8]) -> Result<Self, Error> {
+        Ok(Compact::decode(std::str::from_utf8(b)?))
+    }
+
+    fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
+        Ok(self.as_str().as_bytes().into())
+    }
+}
+
+impl CompactPart for Vec<u8> {
+    fn from_bytes(b: &[u8]) -> Result<Self, Error> {
+        Ok(b.to_vec())
+    }
+
+    fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
+        Ok(self.as_slice().into())
+    }
+}
+
+impl CompactPart for () {
+    fn from_bytes(b: &[u8]) -> Result<Self, Error> {
+        if b.is_empty() {
+            Ok(())
+        } else {
+            Err(Error::DecodeError(errors::DecodeError::PartsLengthError {
+                expected: 0,
+                actual: b.len(),
+            }))
+        }
+    }
+    fn from_base64(b: &str) -> Result<Self, Error> {
+        // contents doesn't matter
+        Self::from_bytes(b.as_bytes())
+    }
+
+    fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
+        Ok(Cow::Borrowed(&[]))
+    }
+    fn to_base64(&self) -> Result<Cow<'_, str>, Error> {
+        Ok(Cow::Borrowed(""))
+    }
+}
 
 /// A convenience type alias of the common "JWT" which is a secured/unsecured compact JWS.
 /// Type `T` is the type of the private claims, and type `H` is the type of private header fields
@@ -166,7 +234,7 @@ use crate::errors::{Error, ValidationError};
 ///
 /// // ... some time later, we get token back!
 ///
-/// let token = JWT::<_, biscuit::Empty>::new_encoded(&token);
+/// let token = JWT::<_, biscuit::()>::new_encoded(&token);
 /// let token = token.into_decoded(&signing_secret,
 ///     SignatureAlgorithm::HS256).unwrap();
 /// assert_eq!(*token.payload().unwrap(), expected_claims);
@@ -179,7 +247,7 @@ pub type JWT<T, H> = jws::Decoded<ClaimsSet<T>, H>;
 /// Type `T` is the type of private claims for the encapsulated JWT, and type `H` is the type of the private
 /// header fields of the encapsulated JWT. Type `I` is the private header fields fo the encapsulating JWE.
 ///
-/// Usually, you would set `H` and `I` to `biscuit::Empty` because you usually do not need any private header fields.
+/// Usually, you would set `H` and `I` to `biscuit::()` because you usually do not need any private header fields.
 ///
 /// In general, you should [sign a JWT claims set, then encrypt it](http://crypto.stackexchange.com/a/5466),
 /// although there is nothing stopping you from doing it the other way round.
@@ -189,7 +257,7 @@ pub type JWT<T, H> = jws::Decoded<ClaimsSet<T>, H>;
 ///
 /// ```rust
 /// use std::str::FromStr;
-/// use biscuit::{ClaimsSet, RegisteredClaims, Empty, SingleOrMultiple, JWT, JWE};
+/// use biscuit::{ClaimsSet, RegisteredClaims, (), SingleOrMultiple, JWT, JWE};
 /// use biscuit::jwk::JWK;
 /// use biscuit::jws::{self, Secret};
 /// use biscuit::jwe;
@@ -238,7 +306,7 @@ pub type JWT<T, H> = jws::Decoded<ClaimsSet<T>, H>;
 /// // Encrypt the token
 ///
 /// // You would usually have your own AES key for this, but we will use a zeroed key as an example
-/// let key: JWK<Empty> = JWK::new_octet_key(&vec![0; 256 / 8], Default::default());
+/// let key: JWK<()> = JWK::new_octet_key(&vec![0; 256 / 8], Default::default());
 ///
 /// // We need to create an `EncryptionOptions` with a nonce for AES GCM encryption.
 /// // You must take care NOT to reuse the nonce. You can simply treat the nonce as a 96 bit
@@ -271,7 +339,7 @@ pub type JWT<T, H> = jws::Decoded<ClaimsSet<T>, H>;
 /// // Now, send `token` to your clients
 ///
 /// // ... some time later, we get token back!
-/// let token: JWE<PrivateClaims, Empty, Empty> = JWE::new_encrypted(&token);
+/// let token: JWE<PrivateClaims, (), ()> = JWE::new_encrypted(&token);
 ///
 /// // Decrypt
 /// let decrypted_jwe = token
@@ -289,43 +357,7 @@ pub type JWT<T, H> = jws::Decoded<ClaimsSet<T>, H>;
 /// nonce_counter = nonce_counter + 1u8;
 /// # }
 /// ```
-pub type JWE<I> = jwe::Decrypted<Compact, I>;
-
-/// An empty struct that derives Serialize and Deserialize. Can be used, for example, in places where a type
-/// for custom values (such as private claims in a `ClaimsSet`) is required but you have nothing to implement.
-///
-/// # Examples
-/// ```
-/// use std::str::FromStr;
-/// use biscuit::*;
-/// use biscuit::jws::*;
-/// use biscuit::jwa::*;
-///
-/// # fn main() {
-///
-/// let claims_set = ClaimsSet::<biscuit::Empty> {
-///     registered: RegisteredClaims {
-///         issuer: Some(FromStr::from_str("https://www.acme.com").unwrap()),
-///         subject: Some(FromStr::from_str("John Doe").unwrap()),
-///         audience:
-///             Some(SingleOrMultiple::Single(FromStr::from_str("htts://acme-customer.com").unwrap())),
-///         not_before: Some(1234.into()),
-///         ..Default::default()
-///     },
-///     private: Default::default(),
-/// };
-///
-/// let expected_jwt = JWT::new_decoded(From::from(
-///                                         RegisteredHeader {
-///                                             algorithm: SignatureAlgorithm::HS256,
-///                                             ..Default::default()
-///                                     }),
-///                                     claims_set);
-///
-/// # }
-/// ```
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Serialize, Deserialize, Default)]
-pub struct Empty {}
+pub type JWE<H> = jwe::Decrypted<Compact, H>;
 
 /// A collection of `CompactPart`s that have been converted to `Base64Url`
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -344,8 +376,8 @@ impl Compact {
     }
 
     /// Push a `CompactPart` to the end
-    pub fn push(&mut self, part: &impl Serialize) -> Result<(), Error> {
-        self.push_bytes(&serde_json::to_vec(part)?);
+    pub fn push(&mut self, part: &impl CompactPart) -> Result<(), Error> {
+        self.push_base64(&*part.to_base64()?);
         Ok(())
     }
 
@@ -426,8 +458,8 @@ impl Compact {
     }
 
     /// Convenience function to retrieve a part at a certain index and decode into the type desired
-    pub fn deser_part<T: DeserializeOwned>(&self, index: usize) -> Result<T, Error> {
-        Ok(serde_json::from_slice(&self.part_decoded(index)?)?)
+    pub fn deser_part<T: CompactPart>(&self, index: usize) -> Result<T, Error> {
+        T::from_base64(self.part(index)?)
     }
 
     pub(crate) fn parse_triple(&self) -> Result<(&str, Vec<u8>), Error> {
@@ -919,7 +951,15 @@ pub struct ClaimsSet<T> {
     pub private: T,
 }
 
-// impl<T> CompactJson for ClaimsSet<T> where T: Serialize + DeserializeOwned {}
+impl<T: Serialize + DeserializeOwned> CompactPart for ClaimsSet<T> {
+    fn from_bytes(b: &[u8]) -> Result<Self, Error> {
+        Ok(serde_json::from_slice(b)?)
+    }
+
+    fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
+        Ok(serde_json::to_vec(&self)?.into())
+    }
+}
 
 #[cfg(test)]
 mod tests {

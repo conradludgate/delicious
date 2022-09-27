@@ -4,6 +4,8 @@ use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::auth::Auth;
+
 #[derive(Serialize)]
 pub struct GetResponse {
     website_id: i32,
@@ -25,6 +27,7 @@ pub struct Q {
 }
 
 pub async fn get(
+    _auth: Auth,
     query: Query<Q>,
     db: Extension<DbReconnector>,
 ) -> Result<Json<Vec<GetResponse>>, (StatusCode, String)> {

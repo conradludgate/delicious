@@ -2,7 +2,7 @@
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{errors::Error, jwa::EncryptionResult, jwe::CekAlgorithmHeader, jwk, Empty};
+use crate::{errors::Error, jwa::EncryptionResult, jwe::CekAlgorithmHeader, jwk};
 
 use super::ContentEncryptionAlgorithm;
 
@@ -94,7 +94,7 @@ impl Algorithm {
         self,
         content_alg: ContentEncryptionAlgorithm,
         key: &jwk::JWK<T>,
-    ) -> Result<jwk::JWK<Empty>, Error>
+    ) -> Result<jwk::JWK<()>, Error>
     where
         T: Serialize + DeserializeOwned,
     {
@@ -108,7 +108,7 @@ impl Algorithm {
         }
     }
 
-    fn cek_direct<T>(key: &jwk::JWK<T>) -> Result<jwk::JWK<Empty>, Error>
+    fn cek_direct<T>(key: &jwk::JWK<T>) -> Result<jwk::JWK<()>, Error>
     where
         T: Serialize + DeserializeOwned,
     {
@@ -118,7 +118,7 @@ impl Algorithm {
         }
     }
 
-    fn cek_aes_gcm(content_alg: ContentEncryptionAlgorithm) -> Result<jwk::JWK<Empty>, Error> {
+    fn cek_aes_gcm(content_alg: ContentEncryptionAlgorithm) -> Result<jwk::JWK<()>, Error> {
         let key = content_alg.generate_key()?;
         Ok(jwk::JWK {
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
@@ -167,7 +167,7 @@ impl Algorithm {
         encrypted: &[u8],
         header: &mut CekAlgorithmHeader,
         key: &jwk::JWK<T>,
-    ) -> Result<jwk::JWK<Empty>, Error> {
+    ) -> Result<jwk::JWK<()>, Error> {
         use self::Algorithm::{DirectSymmetricKey, AES_GCM_KW, PBES2};
 
         match self {
@@ -180,12 +180,26 @@ impl Algorithm {
                 },
                 key.algorithm.octet_key()?,
             ),
-            PBES2(kma) => kma.decrypt(
-                encrypted,
-                key.algorithm.octet_key()?,
-                &header.salt.take().ok_or(Error::UnsupportedOperation)?,
-                header.count.take().unwrap_or_default(),
-            ),
+            PBES2(kma) => {
+                let value = kma.decrypt(
+                    encrypted,
+                    key.algorithm.octet_key()?,
+                    &header.salt.take().ok_or(Error::UnsupportedOperation)?,
+                    header.count.take().unwrap_or_default(),
+                )?;
+
+                Ok(jwk::JWK {
+                    algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
+                        value,
+                        key_type: Default::default(),
+                    }),
+                    common: jwk::CommonParameters {
+                        public_key_use: Some(jwk::PublicKeyUse::Encryption),
+                        ..Default::default()
+                    },
+                    additional: Default::default(),
+                })
+            }
             DirectSymmetricKey => Ok(key.clone_without_additional()),
             _ => Err(Error::UnsupportedOperation),
         }
@@ -200,7 +214,7 @@ mod tests {
         rand::{SecureRandom, SystemRandom},
     };
 
-    use crate::{jwa, jwk, Empty};
+    use crate::{jwa, jwk};
 
     /// `KeyManagementAlgorithm::DirectSymmetricKey` returns the same key when CEK is requested
     #[test]
@@ -208,7 +222,7 @@ mod tests {
         let mut key: Vec<u8> = vec![0; 256 / 8];
         not_err!(SystemRandom::new().fill(&mut key));
 
-        let key = jwk::JWK::<Empty> {
+        let key = jwk::JWK::<()> {
             common: Default::default(),
             additional: Default::default(),
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
@@ -231,7 +245,7 @@ mod tests {
         let mut key: Vec<u8> = vec![0; 128 / 8];
         not_err!(SystemRandom::new().fill(&mut key));
 
-        let key = jwk::JWK::<Empty> {
+        let key = jwk::JWK::<()> {
             common: Default::default(),
             additional: Default::default(),
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
@@ -260,7 +274,7 @@ mod tests {
         let mut key: Vec<u8> = vec![0; 256 / 8];
         not_err!(SystemRandom::new().fill(&mut key));
 
-        let key = jwk::JWK::<Empty> {
+        let key = jwk::JWK::<()> {
             common: Default::default(),
             additional: Default::default(),
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {

@@ -4,15 +4,17 @@ mod flattened;
 
 pub use compact::Decoded;
 pub use flattened::{Signable, SignedData};
+use serde::de::DeserializeOwned;
 
+use crate::CompactPart;
 use crate::errors::Error;
 use crate::jwa::SignatureAlgorithm;
 use crate::jwk;
-use crate::Empty;
 
 use num_bigint::BigUint;
 use ring::signature;
 use serde::{self, Deserialize, Serialize};
+use std::borrow::Cow;
 use std::sync::Arc;
 
 /// The secrets used to sign and/or encrypt tokens
@@ -218,7 +220,7 @@ impl From<jwk::RSAKeyParameters> for Secret {
 
 /// JWS Header, consisting of the registered fields and other custom fields
 #[derive(Debug, Eq, PartialEq, Clone, Default, Serialize, Deserialize)]
-pub struct Header<T> {
+pub struct Header<T = ()> {
     /// Registered header fields
     #[serde(flatten)]
     pub registered: RegisteredHeader,
@@ -227,9 +229,19 @@ pub struct Header<T> {
     pub private: T,
 }
 
+impl<T: Serialize + DeserializeOwned> CompactPart for Header<T> {
+    fn from_bytes(b: &[u8]) -> Result<Self, Error> {
+        Ok(serde_json::from_slice(b)?)
+    }
+
+    fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
+        Ok(serde_json::to_vec(&self)?.into())
+    }
+}
+
 // impl<T: Serialize + DeserializeOwned> CompactJson for Header<T> {}
 
-impl Header<Empty> {
+impl Header<()> {
     /// Convenience function to create a header with only registered headers
     pub fn from_registered_header(registered: RegisteredHeader) -> Self {
         Self {
@@ -239,7 +251,7 @@ impl Header<Empty> {
     }
 }
 
-impl From<RegisteredHeader> for Header<Empty> {
+impl From<RegisteredHeader> for Header<()> {
     fn from(registered: RegisteredHeader) -> Self {
         Self::from_registered_header(registered)
     }
@@ -289,7 +301,7 @@ pub struct RegisteredHeader {
     /// Serialized to `jwk`.
     /// Defined in [RFC7515#4.1.3](https://tools.ietf.org/html/rfc7515#section-4.1.3).
     #[serde(rename = "jwk", skip_serializing_if = "Option::is_none")]
-    pub web_key: Option<jwk::JWK<Empty>>,
+    pub web_key: Option<jwk::JWK<()>>,
 
     /// The Key ID. This is currently not implemented (correctly).
     /// Serialized to `kid`.

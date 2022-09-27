@@ -4,6 +4,8 @@ use axum::{extract::Path, http::StatusCode, BoxError, Extension, Json};
 use serde::Serialize;
 use uuid::Uuid;
 
+use super::auth::Auth;
+
 #[derive(Serialize)]
 pub struct GetResponse {
     website_id: i32,
@@ -17,6 +19,7 @@ pub struct GetResponse {
 }
 
 pub async fn get(
+    _auth: Auth,
     id: Path<i32>,
     db: Extension<DbReconnector>,
 ) -> Result<Json<GetResponse>, (StatusCode, String)> {

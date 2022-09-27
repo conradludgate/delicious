@@ -3,6 +3,7 @@
 //! This module contains code to implement JWE, the JOSE standard to encrypt arbitrary payloads.
 //! Most commonly, JWE is used to encrypt a JWS payload, which is a signed JWT. For most common use,
 //! you will want to look at the  [`Compact`](enum.Compact.html) enum.
+use std::borrow::Cow;
 use std::fmt;
 
 use serde::de::{self, DeserializeOwned};
@@ -10,8 +11,7 @@ use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::errors::{DecodeError, Error, ValidationError};
 use crate::jwa::{kma, ContentEncryptionAlgorithm, EncryptionOptions, EncryptionResult};
-use crate::jwk;
-use crate::Empty;
+use crate::{jwk, CompactPart};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 /// Compression algorithm applied to plaintext before encryption.
@@ -188,7 +188,17 @@ pub struct Header<T> {
     pub private: T,
 }
 
-impl Header<Empty> {
+impl<T: Serialize + DeserializeOwned> CompactPart for Header<T> {
+    fn from_bytes(b: &[u8]) -> Result<Self, Error> {
+        Ok(serde_json::from_slice(b)?)
+    }
+
+    fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
+        Ok(serde_json::to_vec(&self)?.into())
+    }
+}
+
+impl Header<()> {
     /// Convenience function to create a header with only registered headers
     pub fn from_registered_header(registered: RegisteredHeader) -> Self {
         Self {
@@ -198,7 +208,7 @@ impl Header<Empty> {
     }
 }
 
-impl From<RegisteredHeader> for Header<Empty> {
+impl From<RegisteredHeader> for Header<()> {
     fn from(registered: RegisteredHeader) -> Self {
         Self::from_registered_header(registered)
     }
@@ -206,16 +216,16 @@ impl From<RegisteredHeader> for Header<Empty> {
 
 /// Rust representation of a JWE
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Decrypted<T, H> {
+pub struct Decrypted<T, H = ()> {
     /// Embedded header
-    header: Header<H>,
+    pub header: Header<H>,
     /// Payload, usually a signed/unsigned JWT
-    payload: T,
+    pub payload: T,
 }
 
 impl<T, H> Decrypted<T, H>
 where
-    T: Serialize + DeserializeOwned,
+    T: CompactPart,
     H: Serialize + DeserializeOwned + Clone,
 {
     /// Create a new encrypted JWE
@@ -238,8 +248,6 @@ where
         key: &jwk::JWK<K>,
         options: &EncryptionOptions,
     ) -> Result<crate::Compact, Error> {
-        use std::borrow::Cow;
-
         // Resolve encryption option
         let content_option: Cow<'_, _> = match self.header.registered.cek_algorithm {
             kma::Algorithm::DirectSymmetricKey => Cow::Borrowed(options),
@@ -268,7 +276,7 @@ where
         // this as part of the encryption process later
 
         // Step 11 involves compressing the payload, which we do not support at the moment
-        let payload = serde_json::to_vec(&self.payload)?;
+        let payload = self.payload.to_bytes()?;
         if self.header.registered.compression_algorithm.is_some() {
             Err(Error::UnsupportedOperation)?;
         }
@@ -355,7 +363,7 @@ where
             Err(Error::UnsupportedOperation)?
         }
 
-        let payload = serde_json::from_slice::<T>(&payload)?;
+        let payload = T::from_bytes(&payload)?;
 
         Ok(Self::new(header, payload))
     }
@@ -389,9 +397,9 @@ mod tests {
     use super::*;
     use crate::jwa::{self, random_aes_gcm_nonce};
     use crate::test::assert_serde_json;
-    use crate::{jws, Compact, JWE};
+    use crate::{jws, Compact, Json, JWE};
 
-    fn cek_oct_key(len: usize) -> jwk::JWK<Empty> {
+    fn cek_oct_key(len: usize) -> jwk::JWK<()> {
         // Construct the encryption key
         let mut key: Vec<u8> = vec![0; len];
         not_err!(SystemRandom::new().fill(&mut key));
@@ -487,10 +495,10 @@ mod tests {
         let external_token = "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..fHhEyBZ9S4CsGi1Y.gnTZjScRZu22rvk.F8SJn0TUAus8w_TaItsOJw";
         let key_json = r#"{"k":"-wcjSeVOJ0V43ij5uDBeFlOR1w2T40jqIfICQb8-sUw","kty":"oct"}"#;
 
-        let key: jwk::JWK<Empty> = not_err!(serde_json::from_str(key_json));
+        let key: jwk::JWK<()> = not_err!(serde_json::from_str(key_json));
         let token: Compact = Compact::decode(external_token);
 
-        let decrypted_jwe = not_err!(Decrypted::<String, Empty>::decrypt(
+        let decrypted_jwe = not_err!(Decrypted::<Json<String>, ()>::decrypt(
             &token,
             &key,
             kma::Algorithm::DirectSymmetricKey,
@@ -498,12 +506,12 @@ mod tests {
         ));
 
         let decrypted_payload = decrypted_jwe.payload;
-        assert_eq!(decrypted_payload, "Encrypted");
+        assert_eq!(decrypted_payload.0, "Encrypted");
     }
 
     #[test]
     fn jwe_header_round_trips() {
-        let test_value: Header<Empty> = From::from(RegisteredHeader {
+        let test_value: Header<()> = From::from(RegisteredHeader {
             cek_algorithm: kma::Algorithm::RSA_OAEP,
             enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
             ..Default::default()
@@ -511,7 +519,7 @@ mod tests {
         let test_json = r#"{"alg":"RSA-OAEP","enc":"A256GCM"}"#;
         assert_serde_json(&test_value, Some(test_json));
 
-        let test_value: Header<Empty> = From::from(RegisteredHeader {
+        let test_value: Header<()> = From::from(RegisteredHeader {
             cek_algorithm: kma::Algorithm::RSA1_5,
             enc_algorithm: ContentEncryptionAlgorithm::A128CBC_HS256,
             ..Default::default()
@@ -519,7 +527,7 @@ mod tests {
         let test_json = r#"{"alg":"RSA1_5","enc":"A128CBC-HS256"}"#;
         assert_serde_json(&test_value, Some(test_json));
 
-        let test_value: Header<Empty> = From::from(RegisteredHeader {
+        let test_value: Header<()> = From::from(RegisteredHeader {
             cek_algorithm: kma::Algorithm::A128KW,
             enc_algorithm: ContentEncryptionAlgorithm::A128CBC_HS256,
             ..Default::default()
@@ -564,7 +572,7 @@ mod tests {
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
                 ..Default::default()
             }),
-            payload.clone(),
+            Json(payload.clone()),
         );
         jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
@@ -574,7 +582,7 @@ mod tests {
         {
             // Check that new header values are added
             let compact = encrypted_jwe.clone();
-            let header: Header<Empty> = compact.deser_part(0).unwrap();
+            let header: Header<()> = compact.deser_part(0).unwrap();
             assert!(header.cek_algorithm.nonce.is_some());
             assert!(header.cek_algorithm.tag.is_some());
 
@@ -589,19 +597,19 @@ mod tests {
         assert_eq!(deserialized_json, encrypted_jwe);
 
         // Decrypt
-        let decrypted_jwe = not_err!(Decrypted::<String, Empty>::decrypt(
+        let decrypted_jwe = not_err!(Decrypted::<Json<String>, ()>::decrypt(
             &encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM
         ));
-        assert_eq!(payload, decrypted_jwe.payload);
+        assert_eq!(payload, decrypted_jwe.payload.0);
     }
 
     #[test]
     fn jwe_a256gcmkw_a256gcm_jws_round_trip() {
         // Construct the JWS
-        let claims = crate::ClaimsSet::<Empty> {
+        let claims = crate::ClaimsSet::<()> {
             registered: crate::RegisteredClaims {
                 issuer: Some(not_err!(FromStr::from_str("https://www.acme.com"))),
                 subject: Some(not_err!(FromStr::from_str("John Doe"))),
@@ -644,7 +652,7 @@ mod tests {
         {
             // Check that new header values are added
             let compact = encrypted_jwe.clone();
-            let header: Header<Empty> = compact.deser_part(0).unwrap();
+            let header: Header<()> = compact.deser_part(0).unwrap();
             assert!(header.cek_algorithm.nonce.is_some());
             assert!(header.cek_algorithm.tag.is_some());
 
@@ -659,7 +667,7 @@ mod tests {
         assert_eq!(deserialized_json, encrypted_jwe);
 
         // Decrypt
-        let decrypted_jwe = not_err!(JWE::<Empty>::decrypt(
+        let decrypted_jwe = not_err!(JWE::<()>::decrypt(
             &encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
@@ -671,7 +679,7 @@ mod tests {
     #[test]
     fn jwe_dir_aes256gcm_jws_round_trip() {
         // Construct the JWS
-        let claims = crate::ClaimsSet::<Empty> {
+        let claims = crate::ClaimsSet::<()> {
             registered: crate::RegisteredClaims {
                 issuer: Some(not_err!(FromStr::from_str("https://www.acme.com"))),
                 subject: Some(not_err!(FromStr::from_str("John Doe"))),
@@ -716,7 +724,7 @@ mod tests {
         {
             let compact = encrypted_jwe.clone();
             // Check that new header values are empty
-            let header: Header<Empty> = compact.deser_part(0).unwrap();
+            let header: Header<()> = compact.deser_part(0).unwrap();
             assert!(header.cek_algorithm.nonce.is_none());
             assert!(header.cek_algorithm.tag.is_none());
 
@@ -731,7 +739,7 @@ mod tests {
         assert_eq!(deserialized_json, encrypted_jwe);
 
         // Decrypt
-        let decrypted_jwe = not_err!(JWE::<Empty>::decrypt(
+        let decrypted_jwe = not_err!(JWE::<()>::decrypt(
             &encrypted_jwe,
             &key,
             kma::Algorithm::DirectSymmetricKey,
@@ -761,7 +769,7 @@ mod tests {
         // Encrypt
         let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
-        let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
+        let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
             kma::AES_GCM::A128.into(),
@@ -791,7 +799,7 @@ mod tests {
         // Encrypt
         let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
-        let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
+        let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
@@ -805,7 +813,7 @@ mod tests {
     fn decrypt_with_incorrect_length() {
         let key = cek_oct_key(256 / 8);
         let invalid = Compact::decode("INVALID");
-        let _ = Decrypted::<Empty, Empty>::decrypt(
+        let _ = Decrypted::<(), ()>::decrypt(
             &invalid,
             &key,
             kma::AES_GCM::A256.into(),
@@ -836,7 +844,7 @@ mod tests {
         let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
-        let mut header: Header<Empty> = encrypted_jwe.deser_part(0).unwrap();
+        let mut header: Header<()> = encrypted_jwe.deser_part(0).unwrap();
         header.cek_algorithm.nonce = Some(vec![0; 96 / 8]);
         let s = format!(
             "{}.{}.{}.{}.{}",
@@ -851,7 +859,7 @@ mod tests {
         );
 
         let encrypted_jwe = Compact::decode(&s);
-        let _ = Decrypted::<Vec<u8>, Empty>::decrypt(
+        let _ = Decrypted::<Vec<u8>, ()>::decrypt(
             &encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
@@ -882,7 +890,7 @@ mod tests {
         let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
-        let mut header: Header<Empty> = encrypted_jwe.deser_part(0).unwrap();
+        let mut header: Header<()> = encrypted_jwe.deser_part(0).unwrap();
         header.cek_algorithm.tag = Some(vec![0; 96 / 8]);
         let s = format!(
             "{}.{}.{}.{}.{}",
@@ -897,7 +905,7 @@ mod tests {
         );
 
         let encrypted_jwe = Compact::decode(&s);
-        let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
+        let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
@@ -938,7 +946,7 @@ mod tests {
         );
 
         let encrypted_jwe = Compact::decode(&s);
-        let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
+        let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
@@ -970,7 +978,7 @@ mod tests {
         let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
-        let mut header: Header<Empty> = encrypted_jwe.deser_part(0).unwrap();
+        let mut header: Header<()> = encrypted_jwe.deser_part(0).unwrap();
         header.registered.media_type = Some("JOSE+JSON".to_string());
         let s = format!(
             "{}.{}.{}.{}.{}",
@@ -985,7 +993,7 @@ mod tests {
         );
 
         let encrypted_jwe = Compact::decode(&s);
-        let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
+        let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
@@ -1027,7 +1035,7 @@ mod tests {
         );
 
         let encrypted_jwe = Compact::decode(&s);
-        let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
+        let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
@@ -1069,7 +1077,7 @@ mod tests {
         );
 
         let encrypted_jwe = Compact::decode(&s);
-        let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
+        let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),
@@ -1111,7 +1119,7 @@ mod tests {
         );
 
         let encrypted_jwe = Compact::decode(&s);
-        let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
+        let _: Decrypted<Vec<u8>, ()> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
             kma::AES_GCM::A256.into(),

@@ -46,8 +46,8 @@ fn signing_input(protected_header: &[u8], payload: &[u8]) -> Vec<u8> {
 /// ```
 /// use biscuit::jws::{Header, RegisteredHeader, Signable};
 /// use biscuit::jwa::SignatureAlgorithm;
-/// use biscuit::Empty;
-/// let header = Header::<Empty>::from(RegisteredHeader {
+/// use biscuit::();
+/// let header = Header::<()>::from(RegisteredHeader {
 ///     algorithm: SignatureAlgorithm::ES256,
 ///     ..Default::default()
 /// });
@@ -156,11 +156,11 @@ impl SignedData {
     /// ```
     /// use biscuit::jwa::SignatureAlgorithm;
     /// use biscuit::jws::{Header, RegisteredHeader, Secret, Signable, SignedData};
-    /// use biscuit::Empty;
+    /// use biscuit::();
     /// use ring::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair};
     /// use std::sync::Arc;
     ///
-    /// let header = Header::<Empty>::from(RegisteredHeader {
+    /// let header = Header::<()>::from(RegisteredHeader {
     ///     algorithm: SignatureAlgorithm::ES256,
     ///     ..Default::default()
     /// });
@@ -314,7 +314,7 @@ mod tests {
     use super::{Header, Secret, Signable, SignedData};
     use crate::jwa::SignatureAlgorithm;
     use crate::jws::RegisteredHeader;
-    use crate::{ClaimsSet, Empty, RegisteredClaims, SingleOrMultiple};
+    use crate::{ClaimsSet, RegisteredClaims, SingleOrMultiple};
 
     #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
     struct PrivateClaims {
@@ -360,7 +360,7 @@ mod tests {
         };
 
         let expected_jwt = not_err!(SignedData::sign(
-            not_err!(Signable::new::<Empty>(
+            not_err!(Signable::new::<()>(
                 From::from(RegisteredHeader {
                     algorithm: SignatureAlgorithm::None,
                     ..Default::default()

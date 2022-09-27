@@ -7,8 +7,7 @@ edition = "2021"
 
 [dependencies]
 delicious-jose = { version = "0.1.0", path = "../delicious-jose" }
-
-axum = "0.5.16"
+axum = { version = "0.5.16", features = ["headers"] }
 futures = "0.3.24"
 headers-core = "0.2.0"
 serde = { version = "1.0.145", features = ["derive"] }
@@ -20,3 +19,7 @@ tracing = "0.1.36"
 tracing-subscriber = "0.3.15"
 tracing-tree = "0.2.1"
 uuid = { version = "1.1.2", features = ["serde"] }
+async-trait = "0.1.57"
+serde_json = "1"
+sha2 = "0.10.6"
+hex = "0.4.3"

@@ -536,7 +536,7 @@ mod tests {
     use ring::constant_time::verify_slices_are_equal;
 
     use super::*;
-    use crate::{jwa, Empty};
+    use crate::jwa;
 
     #[test]
     fn sign_and_verify_none() {
@@ -910,7 +910,7 @@ mod tests {
         let mut key: Vec<u8> = vec![0; 128 / 8];
         not_err!(SystemRandom::new().fill(&mut key));
 
-        let key = jwk::JWK::<Empty> {
+        let key = jwk::JWK::<()> {
             common: Default::default(),
             additional: Default::default(),
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
@@ -938,7 +938,7 @@ mod tests {
         let mut key: Vec<u8> = vec![0; 256 / 8];
         not_err!(SystemRandom::new().fill(&mut key));
 
-        let key = jwk::JWK::<Empty> {
+        let key = jwk::JWK::<()> {
             common: Default::default(),
             additional: Default::default(),
             algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
