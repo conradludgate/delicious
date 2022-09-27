@@ -332,9 +332,9 @@ mod serde_impl {
             D: serde::Deserializer<'de>,
         {
             struct Field(KeyManagementAlgorithm);
-            struct __FieldVisitor;
+            struct FieldVisitor;
 
-            impl<'de> serde::de::Visitor<'de> for __FieldVisitor {
+            impl<'de> serde::de::Visitor<'de> for FieldVisitor {
                 type Value = Field;
                 fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                     formatter.write_str("variant identifier")
@@ -351,35 +351,36 @@ mod serde_impl {
                 where
                     E: serde::de::Error,
                 {
-                    match value {
-                        b"RSA1_5" => Ok(Field(KeyManagementAlgorithm::RSA1_5)),
-                        b"RSA-OAEP" => Ok(Field(KeyManagementAlgorithm::RSA_OAEP)),
-                        b"RSA-OAEP-256" => Ok(Field(KeyManagementAlgorithm::RSA_OAEP_256)),
-                        b"A128KW" => Ok(Field(KeyManagementAlgorithm::A128KW)),
-                        b"A192KW" => Ok(Field(KeyManagementAlgorithm::A192KW)),
-                        b"A256KW" => Ok(Field(KeyManagementAlgorithm::A256KW)),
-                        b"dir" => Ok(Field(KeyManagementAlgorithm::DirectSymmetricKey)),
-                        b"ECDH-ES" => Ok(Field(KeyManagementAlgorithm::ECDH_ES)),
-                        b"ECDH-ES+A128KW" => Ok(Field(KeyManagementAlgorithm::ECDH_ES_A128KW)),
-                        b"ECDH-ES+A192KW" => Ok(Field(KeyManagementAlgorithm::ECDH_ES_A192KW)),
-                        b"ECDH-ES+A256KW" => Ok(Field(KeyManagementAlgorithm::ECDH_ES_A256KW)),
-                        b"A128GCMKW" => Ok(Field(KeyManagementAlgorithm::A128GCMKW)),
-                        b"A192GCMKW" => Ok(Field(KeyManagementAlgorithm::A192GCMKW)),
-                        b"A256GCMKW" => Ok(Field(KeyManagementAlgorithm::A256GCMKW)),
-                        b"PBES2-HS256+A128KW" => Ok(Field(KeyManagementAlgorithm::PBES2_HMAC_AES(
-                            KMA_PBES2::HS256_A128KW,
-                        ))),
-                        b"PBES2-HS384+A192KW" => Ok(Field(KeyManagementAlgorithm::PBES2_HMAC_AES(
-                            KMA_PBES2::HS384_A192KW,
-                        ))),
-                        b"PBES2-HS512+A256KW" => Ok(Field(KeyManagementAlgorithm::PBES2_HMAC_AES(
-                            KMA_PBES2::HS512_A256KW,
-                        ))),
+                    let value = match value {
+                        b"RSA1_5" => KeyManagementAlgorithm::RSA1_5,
+                        b"RSA-OAEP" => KeyManagementAlgorithm::RSA_OAEP,
+                        b"RSA-OAEP-256" => KeyManagementAlgorithm::RSA_OAEP_256,
+                        b"A128KW" => KeyManagementAlgorithm::A128KW,
+                        b"A192KW" => KeyManagementAlgorithm::A192KW,
+                        b"A256KW" => KeyManagementAlgorithm::A256KW,
+                        b"dir" => KeyManagementAlgorithm::DirectSymmetricKey,
+                        b"ECDH-ES" => KeyManagementAlgorithm::ECDH_ES,
+                        b"ECDH-ES+A128KW" => KeyManagementAlgorithm::ECDH_ES_A128KW,
+                        b"ECDH-ES+A192KW" => KeyManagementAlgorithm::ECDH_ES_A192KW,
+                        b"ECDH-ES+A256KW" => KeyManagementAlgorithm::ECDH_ES_A256KW,
+                        b"A128GCMKW" => KeyManagementAlgorithm::A128GCMKW,
+                        b"A192GCMKW" => KeyManagementAlgorithm::A192GCMKW,
+                        b"A256GCMKW" => KeyManagementAlgorithm::A256GCMKW,
+                        b"PBES2-HS256+A128KW" => {
+                            KeyManagementAlgorithm::PBES2_HMAC_AES(KMA_PBES2::HS256_A128KW)
+                        }
+                        b"PBES2-HS384+A192KW" => {
+                            KeyManagementAlgorithm::PBES2_HMAC_AES(KMA_PBES2::HS384_A192KW)
+                        }
+                        b"PBES2-HS512+A256KW" => {
+                            KeyManagementAlgorithm::PBES2_HMAC_AES(KMA_PBES2::HS512_A256KW)
+                        }
                         _ => {
                             let value = String::from_utf8_lossy(value);
-                            Err(serde::de::Error::unknown_variant(&value, VARIANTS))
+                            return Err(serde::de::Error::unknown_variant(&value, VARIANTS));
                         }
-                    }
+                    };
+                    Ok(Field(value))
                 }
             }
             impl<'de> serde::Deserialize<'de> for Field {
@@ -388,7 +389,7 @@ mod serde_impl {
                 where
                     D: serde::Deserializer<'de>,
                 {
-                    deserializer.deserialize_identifier(__FieldVisitor)
+                    deserializer.deserialize_identifier(FieldVisitor)
                 }
             }
             struct Visitor;
@@ -406,7 +407,7 @@ mod serde_impl {
                     Ok(kma)
                 }
             }
-            const VARIANTS: &[&str] = &[
+            static VARIANTS: &[&str] = &[
                 "RSA1_5",
                 "RSA-OAEP",
                 "RSA-OAEP-256",
