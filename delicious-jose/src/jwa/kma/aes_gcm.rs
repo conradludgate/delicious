@@ -1,20 +1,37 @@
 use crate::{errors::Error, jwa::EncryptionResult, jwk, Empty};
 use ring::aead;
 
-use super::KeyManagementAlgorithm;
+/// Key wrapping with AES GCM. [RFC7518#4.7](https://tools.ietf.org/html/rfc7518#section-4.7)
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+#[allow(non_camel_case_types)]
+pub enum AES_GCM {
+    /// Key wrapping with AES GCM using 128-bit key alg
+    A128,
+    /// Key wrapping with AES GCM using 192-bit key alg.
+    /// This is [not supported](https://github.com/briansmith/ring/issues/112) by `ring`.
+    A192,
+    /// Key wrapping with AES GCM using 256-bit key alg
+    A256,
+}
 
-impl KeyManagementAlgorithm {
+impl From<AES_GCM> for super::Algorithm {
+    fn from(a: AES_GCM) -> Self {
+        super::Algorithm::AES_GCM_KW(a)
+    }
+}
+
+impl AES_GCM {
     pub(crate) fn aes_gcm_encrypt(
         self,
         payload: &[u8],
         key: &[u8],
         nonce: &[u8],
     ) -> Result<EncryptionResult, Error> {
-        use KeyManagementAlgorithm::{A128GCMKW, A256GCMKW};
+        use AES_GCM::{A128, A256};
 
         let algorithm = match self {
-            A128GCMKW => &aead::AES_128_GCM,
-            A256GCMKW => &aead::AES_256_GCM,
+            A128 => &aead::AES_128_GCM,
+            A256 => &aead::AES_256_GCM,
             _ => Err(Error::UnsupportedOperation)?,
         };
 
@@ -26,11 +43,11 @@ impl KeyManagementAlgorithm {
         encrypted: &EncryptionResult,
         key: &[u8],
     ) -> Result<jwk::JWK<Empty>, Error> {
-        use KeyManagementAlgorithm::{A128GCMKW, A256GCMKW};
+        use AES_GCM::{A128, A256};
 
         let algorithm = match self {
-            A128GCMKW => &aead::AES_128_GCM,
-            A256GCMKW => &aead::AES_256_GCM,
+            A128 => &aead::AES_128_GCM,
+            A256 => &aead::AES_256_GCM,
             _ => Err(Error::UnsupportedOperation)?,
         };
 
@@ -105,7 +122,7 @@ mod tests {
     };
 
     use crate::{
-        jwa::{random_aes_gcm_nonce, AES_GCM_NONCE_LENGTH},
+        jwa::{kma::Algorithm, random_aes_gcm_nonce, AES_GCM_NONCE_LENGTH},
         jwe::CekAlgorithmHeader,
     };
 
@@ -206,7 +223,7 @@ mod tests {
 
         let nonce = random_aes_gcm_nonce().unwrap();
 
-        let cek_alg = KeyManagementAlgorithm::A128GCMKW;
+        let cek_alg = Algorithm::AES_GCM_KW(AES_GCM::A128);
         let cek = random_key(128 / 8);
 
         let mut header = CekAlgorithmHeader {
@@ -235,7 +252,7 @@ mod tests {
 
         let nonce = random_aes_gcm_nonce().unwrap();
 
-        let cek_alg = KeyManagementAlgorithm::A256GCMKW;
+        let cek_alg = Algorithm::AES_GCM_KW(AES_GCM::A256);
         let cek = random_key(128 / 8);
 
         let mut header = CekAlgorithmHeader {

@@ -1,6 +1,4 @@
-//! JSON Web Key
-//!
-//! This module implements code for JWK as described in [RFC7517](https://tools.ietf.org/html/rfc7517).
+//! [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517)
 
 use std::fmt;
 
@@ -1109,7 +1107,7 @@ mod tests {
                 JWK {
                     common: CommonParameters {
                         algorithm: Some(Algorithm::KeyManagement(
-                            jwa::KeyManagementAlgorithm::A128KW,
+                            jwa::kma::Algorithm::A128KW,
                         )),
                         ..Default::default()
                     },

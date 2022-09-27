@@ -1,18 +1,21 @@
+//! [Cryptographic Algorithms for Key Management](https://www.rfc-editor.org/rfc/rfc7518#section-4)
+
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{errors::Error, jwa::EncryptionResult, jwe::CekAlgorithmHeader, jwk, Empty};
 
-use super::{Algorithm, ContentEncryptionAlgorithm};
+use super::ContentEncryptionAlgorithm;
 
-pub mod aes_gcm;
-pub mod pbes2_aes_kw;
-pub use pbes2_aes_kw::KMA_PBES2;
-use pbes2_aes_kw::PBES2;
+pub(crate) mod aes_gcm;
+mod pbes2_aes_kw;
+
+pub use aes_gcm::AES_GCM;
+pub use pbes2_aes_kw::PBES2;
 
 /// Algorithms for key management as defined in [RFC7518#4](https://tools.ietf.org/html/rfc7518#section-4)
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 #[allow(non_camel_case_types)]
-pub enum KeyManagementAlgorithm {
+pub enum Algorithm {
     /// RSAES-PKCS1-v1_5
     RSA1_5,
     /// RSAES OAEP using default parameters
@@ -36,48 +39,22 @@ pub enum KeyManagementAlgorithm {
     ECDH_ES_A192KW,
     /// ECDH-ES using Concat KDF and "A256KW" wrapping
     ECDH_ES_A256KW,
-    /// Key wrapping with AES GCM using 128-bit key alg
-    A128GCMKW,
-    /// Key wrapping with AES GCM using 192-bit key alg.
-    /// This is [not supported](https://github.com/briansmith/ring/issues/112) by `ring`.
-    A192GCMKW,
-    /// Key wrapping with AES GCM using 256-bit key alg
-    A256GCMKW,
-    /// PBES2 with HMAC SHA and AES key-wrapping
-    PBES2_HMAC_AES(KMA_PBES2),
+    /// Key wrapping with AES GCM. [RFC7518#4.7](https://tools.ietf.org/html/rfc7518#section-4.7)
+    AES_GCM_KW(AES_GCM),
+    /// PBES2 with HMAC SHA and AES key-wrapping. [RFC7518#4.8](https://tools.ietf.org/html/rfc7518#section-4.8)
+    PBES2(PBES2),
 }
 
-impl Default for KeyManagementAlgorithm {
+impl Default for Algorithm {
     fn default() -> Self {
-        KeyManagementAlgorithm::DirectSymmetricKey
+        Algorithm::DirectSymmetricKey
     }
 }
-
-// /// Algorithms for key management as defined in [RFC7518#4.7](https://tools.ietf.org/html/rfc7518#section-4.7)
-// #[derive(Debug, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
-// #[allow(non_camel_case_types)]
-// pub enum KeyManagementAlgorithmAESGCM {
-//     /// Key wrapping with AES GCM using 128-bit key alg
-//     A128GCMKW,
-//     /// Key wrapping with AES GCM using 192-bit key alg.
-//     /// This is [not supported](https://github.com/briansmith/ring/issues/112) by `ring`.
-//     A192GCMKW,
-//     /// Key wrapping with AES GCM using 256-bit key alg
-//     A256GCMKW,
-// }
-
-// /// Algorithms for key management as defined in [RFC7518#4.7](https://tools.ietf.org/html/rfc7518#section-4.7)
-// #[allow(non_camel_case_types)]
-// pub struct AESGCM {
-//     pub kma: KeyManagementAlgorithmAESGCM,
-//     pub iv: Vec<u8>,
-//     pub tag: Vec<u8>,
-// }
 
 /// Describes the type of operations that the key management algorithm
 /// supports with respect to a Content Encryption Key (CEK)
 #[derive(Debug, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
-pub enum KeyManagementAlgorithmType {
+pub enum AlgorithmType {
     /// Wraps a randomly generated CEK using a symmetric encryption algorithm
     SymmetricKeyWrapping,
     /// Encrypt a randomly generated CEK using an asymmetric encryption algorithm,
@@ -90,20 +67,20 @@ pub enum KeyManagementAlgorithmType {
     DirectEncryption,
 }
 
-impl KeyManagementAlgorithm {
+impl Algorithm {
     /// Returns the type of operations that the algorithm is intended to support
-    pub fn algorithm_type(self) -> KeyManagementAlgorithmType {
-        use self::KeyManagementAlgorithm::*;
+    pub fn algorithm_type(self) -> AlgorithmType {
+        use self::Algorithm::*;
 
         match self {
-            A128KW | A192KW | A256KW | A128GCMKW | A192GCMKW | A256GCMKW | PBES2_HMAC_AES(_) => {
-                KeyManagementAlgorithmType::SymmetricKeyWrapping
+            A128KW | A192KW | A256KW | AES_GCM_KW(_) | PBES2(_) => {
+                AlgorithmType::SymmetricKeyWrapping
             }
-            RSA1_5 | RSA_OAEP | RSA_OAEP_256 => KeyManagementAlgorithmType::AsymmetricKeyEncryption,
-            DirectSymmetricKey => KeyManagementAlgorithmType::DirectEncryption,
-            ECDH_ES => KeyManagementAlgorithmType::DirectKeyAgreement,
+            RSA1_5 | RSA_OAEP | RSA_OAEP_256 => AlgorithmType::AsymmetricKeyEncryption,
+            DirectSymmetricKey => AlgorithmType::DirectEncryption,
+            ECDH_ES => AlgorithmType::DirectKeyAgreement,
             ECDH_ES_A128KW | ECDH_ES_A192KW | ECDH_ES_A256KW => {
-                KeyManagementAlgorithmType::KeyAgreementWithKeyWrapping
+                AlgorithmType::KeyAgreementWithKeyWrapping
             }
         }
     }
@@ -121,11 +98,11 @@ impl KeyManagementAlgorithm {
     where
         T: Serialize + DeserializeOwned,
     {
-        use self::KeyManagementAlgorithm::{DirectSymmetricKey, A128GCMKW, A256GCMKW};
+        use self::Algorithm::{DirectSymmetricKey, AES_GCM_KW};
 
         match self {
             DirectSymmetricKey => Self::cek_direct(key),
-            A128GCMKW | A256GCMKW => Self::cek_aes_gcm(content_alg),
+            AES_GCM_KW(_) => Self::cek_aes_gcm(content_alg),
             // PBES2_HS256_A128KW | PBES2_HS384_A192KW | PBES2_HS512_A256KW => Self::cek_pbes2(key),
             _ => Err(Error::UnsupportedOperation),
         }
@@ -150,7 +127,7 @@ impl KeyManagementAlgorithm {
             }),
             common: jwk::CommonParameters {
                 public_key_use: Some(jwk::PublicKeyUse::Encryption),
-                algorithm: Some(Algorithm::ContentEncryption(content_alg)),
+                algorithm: Some(super::Algorithm::ContentEncryption(content_alg)),
                 ..Default::default()
             },
             additional: Default::default(),
@@ -164,26 +141,21 @@ impl KeyManagementAlgorithm {
         key: &jwk::JWK<T>,
         header: &mut CekAlgorithmHeader,
     ) -> Result<Vec<u8>, Error> {
-        use self::KeyManagementAlgorithm::{
-            DirectSymmetricKey, A128GCMKW, A192GCMKW, A256GCMKW, PBES2_HMAC_AES,
-        };
+        use self::Algorithm::{DirectSymmetricKey, AES_GCM_KW, PBES2};
 
         match self {
-            A128GCMKW | A192GCMKW | A256GCMKW => {
+            AES_GCM_KW(kma) => {
                 let nonce = header.nonce.as_deref().ok_or(Error::UnsupportedOperation)?;
-                let encrypted = self.aes_gcm_encrypt(payload, key.algorithm.octet_key()?, nonce)?;
+                let encrypted = kma.aes_gcm_encrypt(payload, key.algorithm.octet_key()?, nonce)?;
                 header.tag = Some(encrypted.tag);
                 Ok(encrypted.encrypted)
             }
-            PBES2_HMAC_AES(kma) => {
-                let key = key.algorithm.octet_key()?;
-                PBES2 {
-                    kma,
-                    salt: header.salt.clone().ok_or(Error::UnsupportedOperation)?,
-                    count: header.count.unwrap_or_default(),
-                }
-                .encrypt(payload, key)
-            }
+            PBES2(kma) => kma.encrypt(
+                payload,
+                key.algorithm.octet_key()?,
+                header.salt.as_deref().ok_or(Error::UnsupportedOperation)?,
+                header.count.unwrap_or_default(),
+            ),
             DirectSymmetricKey => Ok(Vec::new()),
             _ => Err(Error::UnsupportedOperation),
         }
@@ -196,33 +168,24 @@ impl KeyManagementAlgorithm {
         header: &mut CekAlgorithmHeader,
         key: &jwk::JWK<T>,
     ) -> Result<jwk::JWK<Empty>, Error> {
-        use self::KeyManagementAlgorithm::{
-            DirectSymmetricKey, A128GCMKW, A192GCMKW, A256GCMKW, PBES2_HMAC_AES,
-        };
+        use self::Algorithm::{DirectSymmetricKey, AES_GCM_KW, PBES2};
 
         match self {
-            A128GCMKW | A192GCMKW | A256GCMKW => {
-                let key = key.algorithm.octet_key()?;
-
-                self.aes_gcm_decrypt(
-                    &EncryptionResult {
-                        encrypted: encrypted.to_vec(),
-                        nonce: header.nonce.take().unwrap_or_default(),
-                        tag: header.tag.take().unwrap_or_default(),
-                        ..Default::default()
-                    },
-                    key,
-                )
-            }
-            PBES2_HMAC_AES(kma) => {
-                let key = key.algorithm.octet_key()?;
-                PBES2 {
-                    kma,
-                    salt: header.salt.take().unwrap_or_default(),
-                    count: header.count.take().unwrap_or_default(),
-                }
-                .decrypt(encrypted, key)
-            }
+            AES_GCM_KW(kma) => kma.aes_gcm_decrypt(
+                &EncryptionResult {
+                    encrypted: encrypted.to_vec(),
+                    nonce: header.nonce.take().unwrap_or_default(),
+                    tag: header.tag.take().unwrap_or_default(),
+                    ..Default::default()
+                },
+                key.algorithm.octet_key()?,
+            ),
+            PBES2(kma) => kma.decrypt(
+                encrypted,
+                key.algorithm.octet_key()?,
+                &header.salt.take().ok_or(Error::UnsupportedOperation)?,
+                header.count.take().unwrap_or_default(),
+            ),
             DirectSymmetricKey => Ok(key.clone_without_additional()),
             _ => Err(Error::UnsupportedOperation),
         }
@@ -254,7 +217,7 @@ mod tests {
             }),
         };
 
-        let cek_alg = KeyManagementAlgorithm::DirectSymmetricKey;
+        let cek_alg = Algorithm::DirectSymmetricKey;
         let cek = not_err!(cek_alg.cek(jwa::ContentEncryptionAlgorithm::A256GCM, &key));
 
         assert!(
@@ -277,7 +240,7 @@ mod tests {
             }),
         };
 
-        let cek_alg = KeyManagementAlgorithm::A128GCMKW;
+        let cek_alg = Algorithm::AES_GCM_KW(AES_GCM::A128);
         let cek = not_err!(cek_alg.cek(jwa::ContentEncryptionAlgorithm::A128GCM, &key));
         assert_eq!(cek.octet_key().unwrap().len(), 128 / 8);
         assert!(
@@ -306,7 +269,7 @@ mod tests {
             }),
         };
 
-        let cek_alg = KeyManagementAlgorithm::A256GCMKW;
+        let cek_alg = Algorithm::AES_GCM_KW(AES_GCM::A256);
         let cek = not_err!(cek_alg.cek(jwa::ContentEncryptionAlgorithm::A128GCM, &key));
         assert_eq!(cek.octet_key().unwrap().len(), 128 / 8);
         assert!(
@@ -322,16 +285,16 @@ mod tests {
 }
 
 mod serde_impl {
-    use crate::jwa::kma::pbes2_aes_kw::KMA_PBES2;
+    use crate::jwa::kma::{AES_GCM, PBES2};
 
-    use super::KeyManagementAlgorithm;
+    use super::Algorithm;
 
-    impl<'de> serde::Deserialize<'de> for KeyManagementAlgorithm {
+    impl<'de> serde::Deserialize<'de> for Algorithm {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: serde::Deserializer<'de>,
         {
-            struct Field(KeyManagementAlgorithm);
+            struct Field(Algorithm);
             struct FieldVisitor;
 
             impl<'de> serde::de::Visitor<'de> for FieldVisitor {
@@ -352,29 +315,23 @@ mod serde_impl {
                     E: serde::de::Error,
                 {
                     let value = match value {
-                        b"RSA1_5" => KeyManagementAlgorithm::RSA1_5,
-                        b"RSA-OAEP" => KeyManagementAlgorithm::RSA_OAEP,
-                        b"RSA-OAEP-256" => KeyManagementAlgorithm::RSA_OAEP_256,
-                        b"A128KW" => KeyManagementAlgorithm::A128KW,
-                        b"A192KW" => KeyManagementAlgorithm::A192KW,
-                        b"A256KW" => KeyManagementAlgorithm::A256KW,
-                        b"dir" => KeyManagementAlgorithm::DirectSymmetricKey,
-                        b"ECDH-ES" => KeyManagementAlgorithm::ECDH_ES,
-                        b"ECDH-ES+A128KW" => KeyManagementAlgorithm::ECDH_ES_A128KW,
-                        b"ECDH-ES+A192KW" => KeyManagementAlgorithm::ECDH_ES_A192KW,
-                        b"ECDH-ES+A256KW" => KeyManagementAlgorithm::ECDH_ES_A256KW,
-                        b"A128GCMKW" => KeyManagementAlgorithm::A128GCMKW,
-                        b"A192GCMKW" => KeyManagementAlgorithm::A192GCMKW,
-                        b"A256GCMKW" => KeyManagementAlgorithm::A256GCMKW,
-                        b"PBES2-HS256+A128KW" => {
-                            KeyManagementAlgorithm::PBES2_HMAC_AES(KMA_PBES2::HS256_A128KW)
-                        }
-                        b"PBES2-HS384+A192KW" => {
-                            KeyManagementAlgorithm::PBES2_HMAC_AES(KMA_PBES2::HS384_A192KW)
-                        }
-                        b"PBES2-HS512+A256KW" => {
-                            KeyManagementAlgorithm::PBES2_HMAC_AES(KMA_PBES2::HS512_A256KW)
-                        }
+                        b"RSA1_5" => Algorithm::RSA1_5,
+                        b"RSA-OAEP" => Algorithm::RSA_OAEP,
+                        b"RSA-OAEP-256" => Algorithm::RSA_OAEP_256,
+                        b"A128KW" => Algorithm::A128KW,
+                        b"A192KW" => Algorithm::A192KW,
+                        b"A256KW" => Algorithm::A256KW,
+                        b"dir" => Algorithm::DirectSymmetricKey,
+                        b"ECDH-ES" => Algorithm::ECDH_ES,
+                        b"ECDH-ES+A128KW" => Algorithm::ECDH_ES_A128KW,
+                        b"ECDH-ES+A192KW" => Algorithm::ECDH_ES_A192KW,
+                        b"ECDH-ES+A256KW" => Algorithm::ECDH_ES_A256KW,
+                        b"A128GCMKW" => Algorithm::AES_GCM_KW(AES_GCM::A128),
+                        b"A192GCMKW" => Algorithm::AES_GCM_KW(AES_GCM::A192),
+                        b"A256GCMKW" => Algorithm::AES_GCM_KW(AES_GCM::A256),
+                        b"PBES2-HS256+A128KW" => Algorithm::PBES2(PBES2::HS256_A128KW),
+                        b"PBES2-HS384+A192KW" => Algorithm::PBES2(PBES2::HS384_A192KW),
+                        b"PBES2-HS512+A256KW" => Algorithm::PBES2(PBES2::HS512_A256KW),
                         _ => {
                             let value = String::from_utf8_lossy(value);
                             return Err(serde::de::Error::unknown_variant(&value, VARIANTS));
@@ -394,7 +351,7 @@ mod serde_impl {
             }
             struct Visitor;
             impl<'de> serde::de::Visitor<'de> for Visitor {
-                type Value = KeyManagementAlgorithm;
+                type Value = Algorithm;
                 fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                     formatter.write_str("enum KeyManagementAlgorithm")
                 }
@@ -435,35 +392,29 @@ mod serde_impl {
         }
     }
 
-    impl serde::Serialize for KeyManagementAlgorithm {
+    impl serde::Serialize for Algorithm {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: serde::Serializer,
         {
             let (idx, name) = match *self {
-                KeyManagementAlgorithm::RSA1_5 => (0u32, "RSA1_5"),
-                KeyManagementAlgorithm::RSA_OAEP => (1u32, "RSA-OAEP"),
-                KeyManagementAlgorithm::RSA_OAEP_256 => (2u32, "RSA-OAEP-256"),
-                KeyManagementAlgorithm::A128KW => (3u32, "A128KW"),
-                KeyManagementAlgorithm::A192KW => (4u32, "A192KW"),
-                KeyManagementAlgorithm::A256KW => (5u32, "A256KW"),
-                KeyManagementAlgorithm::DirectSymmetricKey => (6u32, "dir"),
-                KeyManagementAlgorithm::ECDH_ES => (7u32, "ECDH-ES"),
-                KeyManagementAlgorithm::ECDH_ES_A128KW => (8u32, "ECDH-ES+A128KW"),
-                KeyManagementAlgorithm::ECDH_ES_A192KW => (9u32, "ECDH-ES+A192KW"),
-                KeyManagementAlgorithm::ECDH_ES_A256KW => (10u32, "ECDH-ES+A256KW"),
-                KeyManagementAlgorithm::A128GCMKW => (11u32, "A128GCMKW"),
-                KeyManagementAlgorithm::A192GCMKW => (12u32, "A192GCMKW"),
-                KeyManagementAlgorithm::A256GCMKW => (13u32, "A256GCMKW"),
-                KeyManagementAlgorithm::PBES2_HMAC_AES(KMA_PBES2::HS256_A128KW) => {
-                    (14u32, "PBES2-HS256+A128KW")
-                }
-                KeyManagementAlgorithm::PBES2_HMAC_AES(KMA_PBES2::HS384_A192KW) => {
-                    (15u32, "PBES2-HS384+A192KW")
-                }
-                KeyManagementAlgorithm::PBES2_HMAC_AES(KMA_PBES2::HS512_A256KW) => {
-                    (16u32, "PBES2-HS512+A256KW")
-                }
+                Algorithm::RSA1_5 => (0u32, "RSA1_5"),
+                Algorithm::RSA_OAEP => (1u32, "RSA-OAEP"),
+                Algorithm::RSA_OAEP_256 => (2u32, "RSA-OAEP-256"),
+                Algorithm::A128KW => (3u32, "A128KW"),
+                Algorithm::A192KW => (4u32, "A192KW"),
+                Algorithm::A256KW => (5u32, "A256KW"),
+                Algorithm::DirectSymmetricKey => (6u32, "dir"),
+                Algorithm::ECDH_ES => (7u32, "ECDH-ES"),
+                Algorithm::ECDH_ES_A128KW => (8u32, "ECDH-ES+A128KW"),
+                Algorithm::ECDH_ES_A192KW => (9u32, "ECDH-ES+A192KW"),
+                Algorithm::ECDH_ES_A256KW => (10u32, "ECDH-ES+A256KW"),
+                Algorithm::AES_GCM_KW(AES_GCM::A128) => (11u32, "A128GCMKW"),
+                Algorithm::AES_GCM_KW(AES_GCM::A192) => (12u32, "A192GCMKW"),
+                Algorithm::AES_GCM_KW(AES_GCM::A256) => (13u32, "A256GCMKW"),
+                Algorithm::PBES2(PBES2::HS256_A128KW) => (14u32, "PBES2-HS256+A128KW"),
+                Algorithm::PBES2(PBES2::HS384_A192KW) => (15u32, "PBES2-HS384+A192KW"),
+                Algorithm::PBES2(PBES2::HS512_A256KW) => (16u32, "PBES2-HS512+A256KW"),
             };
             serializer.serialize_unit_variant("KeyManagementAlgorithm", idx, name)
         }

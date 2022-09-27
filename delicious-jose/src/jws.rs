@@ -1,7 +1,4 @@
-//! JSON Web Signatures, including JWT signing and headers
-//!
-//! Defined in [RFC 7515](https://tools.ietf.org/html/rfc7515). For most common use,
-//! you will want to look at the  [`Compact`](enum.Compact.html) enum.
+//! [JSON Web Signatures](https://tools.ietf.org/html/rfc7515), including JWT signing and headers
 mod compact;
 mod flattened;
 

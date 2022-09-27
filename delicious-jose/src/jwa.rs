@@ -1,6 +1,4 @@
-//! JSON Web Algorithms
-//!
-//! Code for implementing JWA according to [RFC 7518](https://tools.ietf.org/html/rfc7518).
+//! [JSON Web Algorithms](https://www.rfc-editor.org/rfc/rfc7518)
 //!
 //! Typically, you will not use these directly, but as part of a JWS or JWE.
 
@@ -19,13 +17,12 @@ use crate::jwa::kma::aes_gcm::{aes_gcm_decrypt, aes_gcm_encrypt};
 use crate::jwk;
 use crate::jws::Secret;
 
-pub use ring::rand::SecureRandom;
+use ring::rand::SecureRandom;
 
-mod kma;
+pub mod kma;
 mod cea {
     pub mod aes_cbc_hmac_sha;
 }
-pub use kma::{KeyManagementAlgorithm, KMA_PBES2};
 
 /// AES GCM Nonce length, in bytes
 const AES_GCM_NONCE_LENGTH: usize = 96 / 8;
@@ -81,7 +78,7 @@ pub enum Algorithm {
     /// Algorithms meant for key management. The algorithms are either meant to
     /// encrypt a content encryption key or determine the content encryption key.
     /// See [RFC7518#4](https://tools.ietf.org/html/rfc7518#section-4)
-    KeyManagement(KeyManagementAlgorithm),
+    KeyManagement(kma::Algorithm),
     /// Algorithms meant for content encryption.
     /// See [RFC7518#5](https://tools.ietf.org/html/rfc7518#section-5)
     ContentEncryption(ContentEncryptionAlgorithm),

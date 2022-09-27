@@ -9,9 +9,7 @@ use serde::de::{self, DeserializeOwned};
 use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::errors::{DecodeError, Error, ValidationError};
-use crate::jwa::{
-    ContentEncryptionAlgorithm, EncryptionOptions, EncryptionResult, KeyManagementAlgorithm,
-};
+use crate::jwa::{kma, ContentEncryptionAlgorithm, EncryptionOptions, EncryptionResult};
 use crate::jwk;
 use crate::Empty;
 
@@ -72,7 +70,7 @@ impl<'de> Deserialize<'de> for CompressionAlgorithm {
 pub struct RegisteredHeader {
     /// Algorithm used to encrypt or determine the value of the Content Encryption Key
     #[serde(rename = "alg")]
-    pub cek_algorithm: KeyManagementAlgorithm,
+    pub cek_algorithm: kma::Algorithm,
 
     /// Content encryption algorithm used to perform authenticated encryption
     /// on the plaintext to produce the ciphertext and the Authentication Tag
@@ -244,7 +242,7 @@ where
 
         // Resolve encryption option
         let content_option: Cow<'_, _> = match self.header.registered.cek_algorithm {
-            KeyManagementAlgorithm::DirectSymmetricKey => Cow::Borrowed(options),
+            kma::Algorithm::DirectSymmetricKey => Cow::Borrowed(options),
             _ => Cow::Owned(
                 self.header
                     .registered
@@ -303,7 +301,7 @@ where
     pub fn decrypt<K: Serialize + DeserializeOwned>(
         encrypted: &crate::Compact,
         key: &jwk::JWK<K>,
-        cek_alg: KeyManagementAlgorithm,
+        cek_alg: kma::Algorithm,
         enc_alg: ContentEncryptionAlgorithm,
     ) -> Result<Self, Error> {
         if encrypted.len() != 5 {
@@ -495,7 +493,7 @@ mod tests {
         let decrypted_jwe = not_err!(Decrypted::<String, Empty>::decrypt(
             &token,
             &key,
-            jwa::KeyManagementAlgorithm::DirectSymmetricKey,
+            kma::Algorithm::DirectSymmetricKey,
             jwa::ContentEncryptionAlgorithm::A256GCM,
         ));
 
@@ -506,7 +504,7 @@ mod tests {
     #[test]
     fn jwe_header_round_trips() {
         let test_value: Header<Empty> = From::from(RegisteredHeader {
-            cek_algorithm: KeyManagementAlgorithm::RSA_OAEP,
+            cek_algorithm: kma::Algorithm::RSA_OAEP,
             enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
             ..Default::default()
         });
@@ -514,7 +512,7 @@ mod tests {
         assert_serde_json(&test_value, Some(test_json));
 
         let test_value: Header<Empty> = From::from(RegisteredHeader {
-            cek_algorithm: KeyManagementAlgorithm::RSA1_5,
+            cek_algorithm: kma::Algorithm::RSA1_5,
             enc_algorithm: ContentEncryptionAlgorithm::A128CBC_HS256,
             ..Default::default()
         });
@@ -522,7 +520,7 @@ mod tests {
         assert_serde_json(&test_value, Some(test_json));
 
         let test_value: Header<Empty> = From::from(RegisteredHeader {
-            cek_algorithm: KeyManagementAlgorithm::A128KW,
+            cek_algorithm: kma::Algorithm::A128KW,
             enc_algorithm: ContentEncryptionAlgorithm::A128CBC_HS256,
             ..Default::default()
         });
@@ -539,7 +537,7 @@ mod tests {
 
         let test_value = Header {
             registered: RegisteredHeader {
-                cek_algorithm: KeyManagementAlgorithm::RSA_OAEP,
+                cek_algorithm: kma::Algorithm::RSA_OAEP,
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
                 ..Default::default()
             },
@@ -562,7 +560,7 @@ mod tests {
             String::from("The true sign of intelligence is not knowledge but imagination.");
         let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
-                cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
+                cek_algorithm: kma::AES_GCM::A256.into(),
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
                 ..Default::default()
             }),
@@ -594,7 +592,7 @@ mod tests {
         let decrypted_jwe = not_err!(Decrypted::<String, Empty>::decrypt(
             &encrypted_jwe,
             &key,
-            KeyManagementAlgorithm::A256GCMKW,
+            kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM
         ));
         assert_eq!(payload, decrypted_jwe.payload);
@@ -630,7 +628,7 @@ mod tests {
         // Construct the JWE
         let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
-                cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
+                cek_algorithm: kma::AES_GCM::A256.into(),
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
                 media_type: Some("JOSE".to_string()),
                 content_type: Some("JOSE".to_string()),
@@ -664,7 +662,7 @@ mod tests {
         let decrypted_jwe = not_err!(JWE::<Empty>::decrypt(
             &encrypted_jwe,
             &key,
-            KeyManagementAlgorithm::A256GCMKW,
+            kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM
         ));
         assert_eq!(jws, decrypted_jwe.payload);
@@ -700,7 +698,7 @@ mod tests {
         // Construct the JWE
         let jwe = Decrypted::new(
             From::from(RegisteredHeader {
-                cek_algorithm: KeyManagementAlgorithm::DirectSymmetricKey,
+                cek_algorithm: kma::Algorithm::DirectSymmetricKey,
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
                 media_type: Some("JOSE".to_string()),
                 content_type: Some("JOSE".to_string()),
@@ -736,7 +734,7 @@ mod tests {
         let decrypted_jwe = not_err!(JWE::<Empty>::decrypt(
             &encrypted_jwe,
             &key,
-            KeyManagementAlgorithm::DirectSymmetricKey,
+            kma::Algorithm::DirectSymmetricKey,
             ContentEncryptionAlgorithm::A256GCM
         ));
         assert_eq!(jws, decrypted_jwe.payload);
@@ -752,7 +750,7 @@ mod tests {
         let payload = "The true sign of intelligence is not knowledge but imagination.";
         let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
-                cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
+                cek_algorithm: kma::AES_GCM::A256.into(),
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
                 ..Default::default()
             }),
@@ -766,7 +764,7 @@ mod tests {
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
-            KeyManagementAlgorithm::A128GCMKW,
+            kma::AES_GCM::A128.into(),
             ContentEncryptionAlgorithm::A256GCM,
         )
         .unwrap();
@@ -782,7 +780,7 @@ mod tests {
         let payload = "The true sign of intelligence is not knowledge but imagination.";
         let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
-                cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
+                cek_algorithm: kma::AES_GCM::A256.into(),
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
                 ..Default::default()
             }),
@@ -796,7 +794,7 @@ mod tests {
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
-            KeyManagementAlgorithm::A256GCMKW,
+            kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A128GCM,
         )
         .unwrap();
@@ -810,7 +808,7 @@ mod tests {
         let _ = Decrypted::<Empty, Empty>::decrypt(
             &invalid,
             &key,
-            KeyManagementAlgorithm::A256GCMKW,
+            kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A128GCM,
         )
         .unwrap();
@@ -826,7 +824,7 @@ mod tests {
         let payload = "The true sign of intelligence is not knowledge but imagination.";
         let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
-                cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
+                cek_algorithm: kma::AES_GCM::A256.into(),
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
                 ..Default::default()
             }),
@@ -856,7 +854,7 @@ mod tests {
         let _ = Decrypted::<Vec<u8>, Empty>::decrypt(
             &encrypted_jwe,
             &key,
-            KeyManagementAlgorithm::A256GCMKW,
+            kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM,
         )
         .unwrap();
@@ -872,7 +870,7 @@ mod tests {
         let payload = "The true sign of intelligence is not knowledge but imagination.";
         let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
-                cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
+                cek_algorithm: kma::AES_GCM::A256.into(),
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
                 ..Default::default()
             }),
@@ -902,7 +900,7 @@ mod tests {
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
-            KeyManagementAlgorithm::A256GCMKW,
+            kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM,
         )
         .unwrap();
@@ -918,7 +916,7 @@ mod tests {
         let payload = "The true sign of intelligence is not knowledge but imagination.";
         let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
-                cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
+                cek_algorithm: kma::AES_GCM::A256.into(),
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
                 ..Default::default()
             }),
@@ -943,7 +941,7 @@ mod tests {
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
-            KeyManagementAlgorithm::A256GCMKW,
+            kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM,
         )
         .unwrap();
@@ -960,7 +958,7 @@ mod tests {
         let payload = "The true sign of intelligence is not knowledge but imagination.";
         let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
-                cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
+                cek_algorithm: kma::AES_GCM::A256.into(),
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
                 ..Default::default()
             }),
@@ -990,7 +988,7 @@ mod tests {
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
-            KeyManagementAlgorithm::A256GCMKW,
+            kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM,
         )
         .unwrap();
@@ -1007,7 +1005,7 @@ mod tests {
         let payload = "The true sign of intelligence is not knowledge but imagination.";
         let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
-                cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
+                cek_algorithm: kma::AES_GCM::A256.into(),
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
                 ..Default::default()
             }),
@@ -1032,7 +1030,7 @@ mod tests {
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
-            KeyManagementAlgorithm::A256GCMKW,
+            kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM,
         )
         .unwrap();
@@ -1049,7 +1047,7 @@ mod tests {
         let payload = "The true sign of intelligence is not knowledge but imagination.";
         let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
-                cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
+                cek_algorithm: kma::AES_GCM::A256.into(),
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
                 ..Default::default()
             }),
@@ -1074,7 +1072,7 @@ mod tests {
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
-            KeyManagementAlgorithm::A256GCMKW,
+            kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM,
         )
         .unwrap();
@@ -1091,7 +1089,7 @@ mod tests {
         let payload = "The true sign of intelligence is not knowledge but imagination.";
         let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
-                cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
+                cek_algorithm: kma::AES_GCM::A256.into(),
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
                 ..Default::default()
             }),
@@ -1116,7 +1114,7 @@ mod tests {
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
             &key,
-            KeyManagementAlgorithm::A256GCMKW,
+            kma::AES_GCM::A256.into(),
             ContentEncryptionAlgorithm::A256GCM,
         )
         .unwrap();

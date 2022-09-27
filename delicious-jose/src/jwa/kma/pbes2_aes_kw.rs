@@ -8,10 +8,10 @@ use crate::errors::Error;
 use crate::jwk;
 use crate::Empty;
 
-/// Algorithms for key management as defined in [RFC7518#4.8](https://tools.ietf.org/html/rfc7518#section-4.8)
+/// PBES2 with HMAC SHA and AES key-wrapping. [RFC7518#4.8](https://tools.ietf.org/html/rfc7518#section-4.8)
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 #[allow(non_camel_case_types)]
-pub enum KMA_PBES2 {
+pub enum PBES2 {
     /// PBES2 with HMAC SHA-256 and "A128KW" wrapping
     HS256_A128KW,
     /// PBES2 with HMAC SHA-384 and "A192KW" wrapping
@@ -20,50 +20,52 @@ pub enum KMA_PBES2 {
     HS512_A256KW,
 }
 
-/// Algorithms for key management as defined in [RFC7518#4.8](https://tools.ietf.org/html/rfc7518#section-4.8)
-#[allow(non_camel_case_types)]
-pub struct PBES2 {
-    pub kma: KMA_PBES2,
-    pub salt: String,
-    pub count: u32,
+impl From<PBES2> for super::Algorithm {
+    fn from(p: PBES2) -> Self {
+        super::Algorithm::PBES2(p)
+    }
 }
 
 impl PBES2 {
-    pub fn encrypt(self, payload: &[u8], key: &[u8]) -> Result<Vec<u8>, Error> {
-        use KMA_PBES2::{
-            HS256_A128KW, HS384_A192KW, HS512_A256KW,
-        };
+    pub fn encrypt(
+        self,
+        payload: &[u8],
+        key: &[u8],
+        salt: &str,
+        count: u32,
+    ) -> Result<Vec<u8>, Error> {
+        use PBES2::{HS256_A128KW, HS384_A192KW, HS512_A256KW};
 
         use ring::pbkdf2;
-        let alg = match self.kma {
+        let alg = match self {
             HS256_A128KW => pbkdf2::PBKDF2_HMAC_SHA256,
             HS384_A192KW => pbkdf2::PBKDF2_HMAC_SHA384,
             HS512_A256KW => pbkdf2::PBKDF2_HMAC_SHA512,
         };
-        let len = match self.kma {
+        let len = match self {
             HS256_A128KW => 128 / 8,
             HS384_A192KW => 192 / 8,
             HS512_A256KW => 256 / 8,
         };
-        let count = NonZeroU32::new(self.count).ok_or(Error::UnspecifiedCryptographicError)?;
+        let count = NonZeroU32::new(count).ok_or(Error::UnspecifiedCryptographicError)?;
 
         // compute salt
-        let mut salt = match self.kma {
+        let mut salt1 = match self {
             HS256_A128KW => b"PBES2-HS256+A128KW".to_vec(),
             HS384_A192KW => b"PBES2-HS384+A192KW".to_vec(),
             HS512_A256KW => b"PBES2-HS512+A256KW".to_vec(),
         };
-        salt.push(0);
-        base64::decode_config_buf(self.salt, base64::URL_SAFE_NO_PAD, &mut salt)?;
+        salt1.push(0);
+        base64::decode_config_buf(salt, base64::URL_SAFE_NO_PAD, &mut salt1)?;
 
         let mut dk = [0; 32];
-        pbkdf2::derive(alg, count, &salt, key, &mut dk[..len]);
+        pbkdf2::derive(alg, count, &salt1, key, &mut dk[..len]);
 
         let len = (payload.len() + 7) / 8;
         let mut out = vec![0; len * 8 + 8];
         out[8..][..payload.len()].copy_from_slice(payload);
 
-        match self.kma {
+        match self {
             HS256_A128KW => aes_key_wrap(Aes128::new_from_slice(&dk[..16])?, &mut out),
             HS384_A192KW => aes_key_wrap(Aes192::new_from_slice(&dk[..24])?, &mut out),
             HS512_A256KW => aes_key_wrap(Aes256::new_from_slice(&dk)?, &mut out),
@@ -72,35 +74,39 @@ impl PBES2 {
         Ok(out)
     }
 
-    pub fn decrypt(self, encrypted: &[u8], key: &[u8]) -> Result<jwk::JWK<Empty>, Error> {
-        use KMA_PBES2::{
-            HS256_A128KW, HS384_A192KW, HS512_A256KW,
-        };
+    pub fn decrypt(
+        self,
+        encrypted: &[u8],
+        key: &[u8],
+        salt: &str,
+        count: u32,
+    ) -> Result<jwk::JWK<Empty>, Error> {
+        use PBES2::{HS256_A128KW, HS384_A192KW, HS512_A256KW};
 
         use ring::pbkdf2;
-        let alg = match self.kma {
+        let alg = match self {
             HS256_A128KW => pbkdf2::PBKDF2_HMAC_SHA256,
             HS384_A192KW => pbkdf2::PBKDF2_HMAC_SHA384,
             HS512_A256KW => pbkdf2::PBKDF2_HMAC_SHA512,
         };
-        let len = match self.kma {
+        let len = match self {
             HS256_A128KW => 128 / 8,
             HS384_A192KW => 192 / 8,
             HS512_A256KW => 256 / 8,
         };
-        let count = NonZeroU32::new(self.count).ok_or(Error::UnspecifiedCryptographicError)?;
+        let count = NonZeroU32::new(count).ok_or(Error::UnspecifiedCryptographicError)?;
 
         // compute salt
-        let mut salt = match self.kma {
+        let mut salt1 = match self {
             HS256_A128KW => b"PBES2-HS256+A128KW".to_vec(),
             HS384_A192KW => b"PBES2-HS384+A192KW".to_vec(),
             HS512_A256KW => b"PBES2-HS512+A256KW".to_vec(),
         };
-        salt.push(0);
-        base64::decode_config_buf(self.salt, base64::URL_SAFE_NO_PAD, &mut salt)?;
+        salt1.push(0);
+        base64::decode_config_buf(salt, base64::URL_SAFE_NO_PAD, &mut salt1)?;
 
         let mut dk = [0; 32];
-        pbkdf2::derive(alg, count, &salt, key, &mut dk[..len]);
+        pbkdf2::derive(alg, count, &salt1, key, &mut dk[..len]);
 
         dbg!(&dk);
 
@@ -108,7 +114,7 @@ impl PBES2 {
         let mut out = vec![0; len * 8 + 8];
         out[8..][..encrypted.len()].copy_from_slice(encrypted);
 
-        match self.kma {
+        match self {
             HS256_A128KW => aes_key_unwrap(Aes128::new_from_slice(&dk[..16])?, &mut out)?,
             HS384_A192KW => aes_key_unwrap(Aes192::new_from_slice(&dk[..24])?, &mut out)?,
             HS512_A256KW => aes_key_unwrap(Aes256::new_from_slice(&dk)?, &mut out)?,
@@ -376,13 +382,9 @@ mod tests {
             ],
             base64::URL_SAFE_NO_PAD,
         );
-        let cek = PBES2 {
-            kma: KMA_PBES2::HS256_A128KW,
-            salt,
-            count: 4096,
-        }
-        .encrypt(&payload, key)
-        .unwrap();
+        let cek = PBES2::HS256_A128KW
+            .encrypt(&payload, key, &salt, 4096)
+            .unwrap();
 
         assert_eq!(
             cek,
