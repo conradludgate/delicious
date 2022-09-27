@@ -15,6 +15,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::errors::Error;
+use crate::jwa::kma::aes_gcm::{aes_gcm_decrypt, aes_gcm_encrypt};
 use crate::jwe::CekAlgorithmHeader;
 use crate::jwk;
 use crate::jws::Secret;
@@ -23,6 +24,7 @@ use crate::Empty;
 pub use ring::rand::SecureRandom;
 
 mod kma {
+    pub mod aes_gcm;
     pub mod pbes2_aes_kw;
 }
 mod cea {
@@ -30,8 +32,6 @@ mod cea {
 }
 use kma::pbes2_aes_kw::{KeyManagementAlgorithmPBES2, PBES2};
 
-/// AES GCM Tag Size, in bytes
-const AES_GCM_TAG_SIZE: usize = 128 / 8;
 /// AES GCM Nonce length, in bytes
 const AES_GCM_NONCE_LENGTH: usize = 96 / 8;
 /// AES CBC HMAC SHA Nonce length, in bytes
@@ -565,17 +565,6 @@ impl KeyManagementAlgorithm {
         }
     }
 
-    // fn cek_pbes2<T>(self, key: &jwk::JWK<T>) -> Result<jwk::JWK<Empty>, Error>
-    // where
-    //     T: Serialize + DeserializeOwned,
-    // {
-    //     let key = match key.key_type() {
-    //         jwk::KeyType::Octet => key.clone_without_additional(),
-    //         others => Err(unexpected_key_type_error!(jwk::KeyType::Octet, others)),
-    //     };
-
-    // }
-
     fn cek_aes_gcm(content_alg: ContentEncryptionAlgorithm) -> Result<jwk::JWK<Empty>, Error> {
         let key = content_alg.generate_key()?;
         Ok(jwk::JWK {
@@ -700,51 +689,6 @@ impl KeyManagementAlgorithm {
             _ => Err(Error::UnsupportedOperation),
         }
     }
-
-    fn aes_gcm_encrypt(
-        self,
-        payload: &[u8],
-        key: &[u8],
-        nonce: &[u8],
-    ) -> Result<EncryptionResult, Error> {
-        use self::KeyManagementAlgorithm::{A128GCMKW, A256GCMKW};
-
-        let algorithm = match self {
-            A128GCMKW => &aead::AES_128_GCM,
-            A256GCMKW => &aead::AES_256_GCM,
-            _ => Err(Error::UnsupportedOperation)?,
-        };
-
-        aes_gcm_encrypt(algorithm, payload, nonce, &[], key)
-    }
-
-    fn aes_gcm_decrypt(
-        self,
-        encrypted: &EncryptionResult,
-        key: &[u8],
-    ) -> Result<jwk::JWK<Empty>, Error> {
-        use self::KeyManagementAlgorithm::{A128GCMKW, A256GCMKW};
-
-        let algorithm = match self {
-            A128GCMKW => &aead::AES_128_GCM,
-            A256GCMKW => &aead::AES_256_GCM,
-            _ => Err(Error::UnsupportedOperation)?,
-        };
-
-        let cek = aes_gcm_decrypt(algorithm, encrypted, key)?;
-        Ok(jwk::JWK {
-            algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
-                value: cek,
-                key_type: Default::default(),
-            }),
-            common: jwk::CommonParameters {
-                public_key_use: Some(jwk::PublicKeyUse::Encryption),
-                algorithm: None,
-                ..Default::default()
-            },
-            additional: Default::default(),
-        })
-    }
 }
 
 impl ContentEncryptionAlgorithm {
@@ -855,58 +799,6 @@ impl ContentEncryptionAlgorithm {
         };
         aes_gcm_decrypt(algorithm, encrypted, key)
     }
-}
-
-/// Encrypt a payload with AES GCM
-fn aes_gcm_encrypt(
-    algorithm: &'static aead::Algorithm,
-    payload: &[u8],
-    nonce: &[u8],
-    aad: &[u8],
-    key: &[u8],
-) -> Result<EncryptionResult, Error> {
-    let key = aead::UnboundKey::new(algorithm, key)?;
-    let sealing_key = aead::LessSafeKey::new(key);
-
-    let mut in_out: Vec<u8> = payload.to_vec();
-    let tag = sealing_key.seal_in_place_separate_tag(
-        aead::Nonce::try_assume_unique_for_key(nonce)?,
-        aead::Aad::from(aad),
-        &mut in_out,
-    )?;
-
-    Ok(EncryptionResult {
-        nonce: nonce.to_vec(),
-        encrypted: in_out,
-        tag: tag.as_ref().to_vec(),
-        additional_data: aad.to_vec(),
-    })
-}
-
-/// Decrypts a payload with AES GCM
-fn aes_gcm_decrypt(
-    algorithm: &'static aead::Algorithm,
-    encrypted: &EncryptionResult,
-    key: &[u8],
-) -> Result<Vec<u8>, Error> {
-    // JWA needs a 128 bit tag length. We need to assert that the algorithm has 128 bit tag length
-    assert_eq!(algorithm.tag_len(), AES_GCM_TAG_SIZE);
-    // Also the nonce (or initialization vector) needs to be 96 bits
-    assert_eq!(algorithm.nonce_len(), AES_GCM_NONCE_LENGTH);
-
-    let key = aead::UnboundKey::new(algorithm, key)?;
-    let opening_key = aead::LessSafeKey::new(key);
-
-    let mut in_out = encrypted.encrypted.clone();
-    in_out.append(&mut encrypted.tag.clone());
-
-    let nonce = aead::Nonce::try_assume_unique_for_key(&encrypted.nonce)?;
-    let plaintext = opening_key.open_in_place(
-        nonce,
-        aead::Aad::from(&encrypted.additional_data),
-        &mut in_out,
-    )?;
-    Ok(plaintext.to_vec())
 }
 
 pub(crate) fn random_aes_gcm_nonce() -> Result<Vec<u8>, Error> {
@@ -1276,80 +1168,6 @@ mod tests {
         let rng = SystemRandom::new();
         let mut random: Vec<u8> = vec![0; 8];
         rng.fill(&mut random).unwrap();
-    }
-
-    #[test]
-    fn aes_gcm_128_encryption_round_trip_fixed_key_nonce() {
-        const PAYLOAD: &str = "这个世界值得我们奋战！";
-        let key: Vec<u8> = vec![0; 128 / 8];
-
-        let encrypted = not_err!(aes_gcm_encrypt(
-            &aead::AES_128_GCM,
-            PAYLOAD.as_bytes(),
-            &[0; AES_GCM_NONCE_LENGTH],
-            &[],
-            &key,
-        ));
-        let decrypted = not_err!(aes_gcm_decrypt(&aead::AES_128_GCM, &encrypted, &key));
-
-        let payload = not_err!(String::from_utf8(decrypted));
-        assert_eq!(payload, PAYLOAD);
-    }
-
-    #[test]
-    fn aes_gcm_128_encryption_round_trip() {
-        const PAYLOAD: &str = "这个世界值得我们奋战！";
-        let mut key: Vec<u8> = vec![0; 128 / 8];
-        not_err!(SystemRandom::new().fill(&mut key));
-
-        let encrypted = not_err!(aes_gcm_encrypt(
-            &aead::AES_128_GCM,
-            PAYLOAD.as_bytes(),
-            &random_aes_gcm_nonce().unwrap(),
-            &[],
-            &key,
-        ));
-        let decrypted = not_err!(aes_gcm_decrypt(&aead::AES_128_GCM, &encrypted, &key));
-
-        let payload = not_err!(String::from_utf8(decrypted));
-        assert_eq!(payload, PAYLOAD);
-    }
-
-    #[test]
-    fn aes_gcm_256_encryption_round_trip() {
-        const PAYLOAD: &str = "这个世界值得我们奋战！";
-        let mut key: Vec<u8> = vec![0; 256 / 8];
-        not_err!(SystemRandom::new().fill(&mut key));
-
-        let encrypted = not_err!(aes_gcm_encrypt(
-            &aead::AES_256_GCM,
-            PAYLOAD.as_bytes(),
-            &random_aes_gcm_nonce().unwrap(),
-            &[],
-            &key,
-        ));
-        let decrypted = not_err!(aes_gcm_decrypt(&aead::AES_256_GCM, &encrypted, &key));
-
-        let payload = not_err!(String::from_utf8(decrypted));
-        assert_eq!(payload, PAYLOAD);
-    }
-
-    #[test]
-    fn aes_gcm_256_encryption_round_trip_fixed_key_nonce() {
-        const PAYLOAD: &str = "这个世界值得我们奋战！";
-        let key: Vec<u8> = vec![0; 256 / 8];
-
-        let encrypted = not_err!(aes_gcm_encrypt(
-            &aead::AES_256_GCM,
-            PAYLOAD.as_bytes(),
-            &[0; AES_GCM_NONCE_LENGTH],
-            &[],
-            &key,
-        ));
-        let decrypted = not_err!(aes_gcm_decrypt(&aead::AES_256_GCM, &encrypted, &key));
-
-        let payload = not_err!(String::from_utf8(decrypted));
-        assert_eq!(payload, PAYLOAD);
     }
 
     /// `KeyManagementAlgorithm::DirectSymmetricKey` returns the same key when CEK is requested
