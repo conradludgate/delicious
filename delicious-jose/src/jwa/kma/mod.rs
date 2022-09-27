@@ -9,16 +9,14 @@ pub mod pbes2_aes_kw;
 use pbes2_aes_kw::{KeyManagementAlgorithmPBES2, PBES2};
 
 /// Algorithms for key management as defined in [RFC7518#4](https://tools.ietf.org/html/rfc7518#section-4)
-#[derive(Debug, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
 #[allow(non_camel_case_types)]
 pub enum KeyManagementAlgorithm {
     /// RSAES-PKCS1-v1_5
     RSA1_5,
     /// RSAES OAEP using default parameters
-    #[serde(rename = "RSA-OAEP")]
     RSA_OAEP,
     /// RSAES OAEP using SHA-256 and MGF1 with SHA-256
-    #[serde(rename = "RSA-OAEP-256")]
     RSA_OAEP_256,
     /// AES Key Wrap using 128-bit key. _Unsupported_
     A128KW,
@@ -28,19 +26,14 @@ pub enum KeyManagementAlgorithm {
     /// AES Key Wrap using 256-bit key. _Unsupported_
     A256KW,
     /// Direct use of a shared symmetric key
-    #[serde(rename = "dir")]
     DirectSymmetricKey,
     /// ECDH-ES using Concat KDF
-    #[serde(rename = "ECDH-ES")]
     ECDH_ES,
     /// ECDH-ES using Concat KDF and "A128KW" wrapping
-    #[serde(rename = "ECDH-ES+A128KW")]
     ECDH_ES_A128KW,
     /// ECDH-ES using Concat KDF and "A192KW" wrapping
-    #[serde(rename = "ECDH-ES+A192KW")]
     ECDH_ES_A192KW,
     /// ECDH-ES using Concat KDF and "A256KW" wrapping
-    #[serde(rename = "ECDH-ES+A256KW")]
     ECDH_ES_A256KW,
     /// Key wrapping with AES GCM using 128-bit key alg
     A128GCMKW,
@@ -50,13 +43,10 @@ pub enum KeyManagementAlgorithm {
     /// Key wrapping with AES GCM using 256-bit key alg
     A256GCMKW,
     /// PBES2 with HMAC SHA-256 and "A128KW" wrapping
-    #[serde(rename = "PBES2-HS256+A128KW")]
     PBES2_HS256_A128KW,
     /// PBES2 with HMAC SHA-384 and "A192KW" wrapping
-    #[serde(rename = "PBES2-HS384+A192KW")]
     PBES2_HS384_A192KW,
     /// PBES2 with HMAC SHA-512 and "A256KW" wrapping
-    #[serde(rename = "PBES2-HS512+A256KW")]
     PBES2_HS512_A256KW,
 }
 
@@ -370,5 +360,145 @@ mod tests {
         assert!(
             verify_slices_are_equal(cek.octet_key().unwrap(), key.octet_key().unwrap()).is_err()
         );
+    }
+}
+
+mod serde_impl {
+    use super::KeyManagementAlgorithm;
+
+    impl<'de> serde::Deserialize<'de> for KeyManagementAlgorithm {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            struct Field(KeyManagementAlgorithm);
+            struct __FieldVisitor;
+
+            impl<'de> serde::de::Visitor<'de> for __FieldVisitor {
+                type Value = Field;
+                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    formatter.write_str("variant identifier")
+                }
+
+                fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    self.visit_bytes(value.as_bytes())
+                }
+
+                fn visit_bytes<E>(self, value: &[u8]) -> Result<Self::Value, E>
+                where
+                    E: serde::de::Error,
+                {
+                    match value {
+                        b"RSA1_5" => Ok(Field(KeyManagementAlgorithm::RSA1_5)),
+                        b"RSA-OAEP" => Ok(Field(KeyManagementAlgorithm::RSA_OAEP)),
+                        b"RSA-OAEP-256" => Ok(Field(KeyManagementAlgorithm::RSA_OAEP_256)),
+                        b"A128KW" => Ok(Field(KeyManagementAlgorithm::A128KW)),
+                        b"A192KW" => Ok(Field(KeyManagementAlgorithm::A192KW)),
+                        b"A256KW" => Ok(Field(KeyManagementAlgorithm::A256KW)),
+                        b"dir" => Ok(Field(KeyManagementAlgorithm::DirectSymmetricKey)),
+                        b"ECDH-ES" => Ok(Field(KeyManagementAlgorithm::ECDH_ES)),
+                        b"ECDH-ES+A128KW" => Ok(Field(KeyManagementAlgorithm::ECDH_ES_A128KW)),
+                        b"ECDH-ES+A192KW" => Ok(Field(KeyManagementAlgorithm::ECDH_ES_A192KW)),
+                        b"ECDH-ES+A256KW" => Ok(Field(KeyManagementAlgorithm::ECDH_ES_A256KW)),
+                        b"A128GCMKW" => Ok(Field(KeyManagementAlgorithm::A128GCMKW)),
+                        b"A192GCMKW" => Ok(Field(KeyManagementAlgorithm::A192GCMKW)),
+                        b"A256GCMKW" => Ok(Field(KeyManagementAlgorithm::A256GCMKW)),
+                        b"PBES2-HS256+A128KW" => {
+                            Ok(Field(KeyManagementAlgorithm::PBES2_HS256_A128KW))
+                        }
+                        b"PBES2-HS384+A192KW" => {
+                            Ok(Field(KeyManagementAlgorithm::PBES2_HS384_A192KW))
+                        }
+                        b"PBES2-HS512+A256KW" => {
+                            Ok(Field(KeyManagementAlgorithm::PBES2_HS512_A256KW))
+                        }
+                        _ => {
+                            let value = String::from_utf8_lossy(value);
+                            Err(serde::de::Error::unknown_variant(&value, VARIANTS))
+                        }
+                    }
+                }
+            }
+            impl<'de> serde::Deserialize<'de> for Field {
+                #[inline]
+                fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+                where
+                    D: serde::Deserializer<'de>,
+                {
+                    deserializer.deserialize_identifier(__FieldVisitor)
+                }
+            }
+            struct Visitor;
+            impl<'de> serde::de::Visitor<'de> for Visitor {
+                type Value = KeyManagementAlgorithm;
+                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    formatter.write_str("enum KeyManagementAlgorithm")
+                }
+                fn visit_enum<A>(self, data: A) -> Result<Self::Value, A::Error>
+                where
+                    A: serde::de::EnumAccess<'de>,
+                {
+                    let (Field(kma), variant) = serde::de::EnumAccess::variant(data)?;
+                    serde::de::VariantAccess::unit_variant(variant)?;
+                    Ok(kma)
+                }
+            }
+            const VARIANTS: &[&str] = &[
+                "RSA1_5",
+                "RSA-OAEP",
+                "RSA-OAEP-256",
+                "A128KW",
+                "A192KW",
+                "A256KW",
+                "dir",
+                "ECDH-ES",
+                "ECDH-ES+A128KW",
+                "ECDH-ES+A192KW",
+                "ECDH-ES+A256KW",
+                "A128GCMKW",
+                "A192GCMKW",
+                "A256GCMKW",
+                "PBES2-HS256+A128KW",
+                "PBES2-HS384+A192KW",
+                "PBES2-HS512+A256KW",
+            ];
+            serde::Deserializer::deserialize_enum(
+                deserializer,
+                "KeyManagementAlgorithm",
+                VARIANTS,
+                Visitor,
+            )
+        }
+    }
+
+    impl serde::Serialize for KeyManagementAlgorithm {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            let (idx, name) = match *self {
+                KeyManagementAlgorithm::RSA1_5 => (0u32, "RSA1_5"),
+                KeyManagementAlgorithm::RSA_OAEP => (1u32, "RSA-OAEP"),
+                KeyManagementAlgorithm::RSA_OAEP_256 => (2u32, "RSA-OAEP-256"),
+                KeyManagementAlgorithm::A128KW => (3u32, "A128KW"),
+                KeyManagementAlgorithm::A192KW => (4u32, "A192KW"),
+                KeyManagementAlgorithm::A256KW => (5u32, "A256KW"),
+                KeyManagementAlgorithm::DirectSymmetricKey => (6u32, "dir"),
+                KeyManagementAlgorithm::ECDH_ES => (7u32, "ECDH-ES"),
+                KeyManagementAlgorithm::ECDH_ES_A128KW => (8u32, "ECDH-ES+A128KW"),
+                KeyManagementAlgorithm::ECDH_ES_A192KW => (9u32, "ECDH-ES+A192KW"),
+                KeyManagementAlgorithm::ECDH_ES_A256KW => (10u32, "ECDH-ES+A256KW"),
+                KeyManagementAlgorithm::A128GCMKW => (11u32, "A128GCMKW"),
+                KeyManagementAlgorithm::A192GCMKW => (12u32, "A192GCMKW"),
+                KeyManagementAlgorithm::A256GCMKW => (13u32, "A256GCMKW"),
+                KeyManagementAlgorithm::PBES2_HS256_A128KW => (14u32, "PBES2-HS256+A128KW"),
+                KeyManagementAlgorithm::PBES2_HS384_A192KW => (15u32, "PBES2-HS384+A192KW"),
+                KeyManagementAlgorithm::PBES2_HS512_A256KW => (16u32, "PBES2-HS512+A256KW"),
+            };
+            serializer.serialize_unit_variant("KeyManagementAlgorithm", idx, name)
+        }
     }
 }
