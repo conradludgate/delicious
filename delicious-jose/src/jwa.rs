@@ -2095,11 +2095,14 @@ mod tests {
         let kek = hex_literal::hex!("000102030405060708090A0B0C0D0E0F");
         let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF");
 
-        let mut out = [0; 8+16];
+        let mut out = [0; 8 + 16];
         out[8..].copy_from_slice(&data);
         block_cipher_key_wrap::<aes::Aes128Enc>(&kek, &mut out).unwrap();
-        
-        assert_eq!(out, hex_literal::hex!("1FA68B0A8112B447 AEF34BD8FB5A7B82 9D3E862371D2CFE5"));
+
+        assert_eq!(
+            out,
+            hex_literal::hex!("1FA68B0A8112B447 AEF34BD8FB5A7B82 9D3E862371D2CFE5")
+        );
 
         block_cipher_key_unwrap::<aes::Aes128Dec>(&kek, &mut out).unwrap();
 
@@ -2111,11 +2114,14 @@ mod tests {
         let kek = hex_literal::hex!("000102030405060708090A0B0C0D0E0F1011121314151617");
         let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF");
 
-        let mut out = [0; 8+16];
+        let mut out = [0; 8 + 16];
         out[8..].copy_from_slice(&data);
         block_cipher_key_wrap::<aes::Aes192Enc>(&kek, &mut out).unwrap();
-        
-        assert_eq!(out, hex_literal::hex!("96778B25AE6CA435 F92B5B97C050AED2 468AB8A17AD84E5D"));
+
+        assert_eq!(
+            out,
+            hex_literal::hex!("96778B25AE6CA435 F92B5B97C050AED2 468AB8A17AD84E5D")
+        );
 
         block_cipher_key_unwrap::<aes::Aes192Dec>(&kek, &mut out).unwrap();
 
@@ -2124,14 +2130,18 @@ mod tests {
 
     #[test]
     fn aes256_keywrapping_128() {
-        let kek = hex_literal::hex!("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
+        let kek =
+            hex_literal::hex!("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
         let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF");
 
-        let mut out = [0; 8+16];
+        let mut out = [0; 8 + 16];
         out[8..].copy_from_slice(&data);
         block_cipher_key_wrap::<aes::Aes256Enc>(&kek, &mut out).unwrap();
-        
-        assert_eq!(out, hex_literal::hex!("64E8C3F9CE0F5BA2 63E9777905818A2A 93C8191E7D6E8AE7"));
+
+        assert_eq!(
+            out,
+            hex_literal::hex!("64E8C3F9CE0F5BA2 63E9777905818A2A 93C8191E7D6E8AE7")
+        );
 
         block_cipher_key_unwrap::<aes::Aes256Dec>(&kek, &mut out).unwrap();
 
@@ -2143,11 +2153,16 @@ mod tests {
         let kek = hex_literal::hex!("000102030405060708090A0B0C0D0E0F1011121314151617");
         let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF0001020304050607");
 
-        let mut out = [0; 8+24];
+        let mut out = [0; 8 + 24];
         out[8..].copy_from_slice(&data);
         block_cipher_key_wrap::<aes::Aes192Enc>(&kek, &mut out).unwrap();
-        
-        assert_eq!(out, hex_literal::hex!("031D33264E15D332 68F24EC260743EDC E1C6C7DDEE725A93 6BA814915C6762D2"));
+
+        assert_eq!(
+            out,
+            hex_literal::hex!(
+                "031D33264E15D332 68F24EC260743EDC E1C6C7DDEE725A93 6BA814915C6762D2"
+            )
+        );
 
         block_cipher_key_unwrap::<aes::Aes192Dec>(&kek, &mut out).unwrap();
 
@@ -2156,14 +2171,20 @@ mod tests {
 
     #[test]
     fn aes256_keywrapping_192() {
-        let kek = hex_literal::hex!("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
+        let kek =
+            hex_literal::hex!("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
         let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF0001020304050607");
 
-        let mut out = [0; 8+24];
+        let mut out = [0; 8 + 24];
         out[8..].copy_from_slice(&data);
         block_cipher_key_wrap::<aes::Aes256Enc>(&kek, &mut out).unwrap();
-        
-        assert_eq!(out, hex_literal::hex!("A8F9BC1612C68B3F F6E6F4FBE30E71E4 769C8B80A32CB895 8CD5D17D6B254DA1"));
+
+        assert_eq!(
+            out,
+            hex_literal::hex!(
+                "A8F9BC1612C68B3F F6E6F4FBE30E71E4 769C8B80A32CB895 8CD5D17D6B254DA1"
+            )
+        );
 
         block_cipher_key_unwrap::<aes::Aes256Dec>(&kek, &mut out).unwrap();
 
@@ -2172,15 +2193,22 @@ mod tests {
 
     #[test]
     fn aes256_keywrapping_256() {
-        let kek = hex_literal::hex!("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
-        let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF000102030405060708090A0B0C0D0E0F");
+        let kek =
+            hex_literal::hex!("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
+        let data =
+            hex_literal::hex!("00112233445566778899AABBCCDDEEFF000102030405060708090A0B0C0D0E0F");
 
-        let mut out = [0; 8+32];
+        let mut out = [0; 8 + 32];
         out[8..].copy_from_slice(&data);
         block_cipher_key_wrap::<aes::Aes256Enc>(&kek, &mut out).unwrap();
-        
-        assert_eq!(out, hex_literal::hex!("28C9F404C4B810F4 CBCCB35CFB87F826 3F5786E2D80ED326
-            CBC7F0E71A99F43B FB988B9B7A02DD21"));
+
+        assert_eq!(
+            out,
+            hex_literal::hex!(
+                "28C9F404C4B810F4 CBCCB35CFB87F826 3F5786E2D80ED326
+            CBC7F0E71A99F43B FB988B9B7A02DD21"
+            )
+        );
 
         block_cipher_key_unwrap::<aes::Aes256Dec>(&kek, &mut out).unwrap();
 

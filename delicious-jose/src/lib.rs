@@ -358,6 +358,13 @@ impl Compact {
         self.source.push('.');
     }
 
+    /// Push a `CompactPart` to the end
+    pub(crate) fn push_base64(&mut self, input: &str) {
+        self.source.push_str(input);
+        self.indices.push(self.source.len());
+        self.source.push('.');
+    }
+
     /// Returns the number of parts
     pub fn len(&self) -> usize {
         self.indices.len()
@@ -398,7 +405,7 @@ impl Compact {
     }
 
     /// Convenience function to retrieve a part at a certain index and decode into the type desired
-    pub fn part(&self, index: usize) -> Result<&str, Error> {
+    pub(crate) fn part(&self, index: usize) -> Result<&str, Error> {
         let end = *self
             .indices
             .get(index)

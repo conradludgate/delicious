@@ -236,7 +236,7 @@ where
     /// If your `cek_algorithm` is `dir` or Direct, then the options will be used to encrypt
     /// your content directly.
     pub fn encrypt<K: Serialize + DeserializeOwned>(
-        &self,
+        mut self,
         key: &jwk::JWK<K>,
         options: &EncryptionOptions,
     ) -> Result<crate::Compact, Error> {
@@ -260,11 +260,10 @@ where
             .registered
             .cek_algorithm
             .cek(self.header.registered.enc_algorithm, key)?;
-        let mut header = self.header.clone();
         let encrypted_cek = self.header.registered.cek_algorithm.wrap_key(
             cek.algorithm.octet_key()?,
             key,
-            &mut header.cek_algorithm,
+            &mut self.header.cek_algorithm,
         )?;
 
         // Steps 9 and 10 involves calculating an initialization vector (nonce) for content encryption. We do
@@ -272,16 +271,16 @@ where
 
         // Step 11 involves compressing the payload, which we do not support at the moment
         let payload = serde_json::to_vec(&self.payload)?;
-        if header.registered.compression_algorithm.is_some() {
+        if self.header.registered.compression_algorithm.is_some() {
             Err(Error::UnsupportedOperation)?;
         }
 
         // Steps 12 to 14 involves the calculation of `Additional Authenticated Data` for encryption. In
         // our compact example, our header is the AAD.
         let encoded_protected_header =
-            base64::encode_config(&serde_json::to_vec(&header)?, base64::URL_SAFE_NO_PAD);
+            base64::encode_config(&serde_json::to_vec(&self.header)?, base64::URL_SAFE_NO_PAD);
         // Step 15 involves the actual encryption.
-        let encrypted_payload = header.registered.enc_algorithm.encrypt(
+        let encrypted_payload = self.header.registered.enc_algorithm.encrypt(
             &payload,
             encoded_protected_header.as_bytes(),
             &cek,
@@ -290,7 +289,7 @@ where
 
         // Finally create the JWE
         let mut compact = crate::Compact::new();
-        compact.push(&header)?;
+        compact.push_base64(&encoded_protected_header);
         compact.push_bytes(&encrypted_cek);
         compact.push_bytes(&encrypted_payload.nonce);
         compact.push_bytes(&encrypted_payload.encrypted);
@@ -392,7 +391,7 @@ mod tests {
     use super::*;
     use crate::jwa::{self, random_aes_gcm_nonce};
     use crate::test::assert_serde_json;
-    use crate::{jws, Compact};
+    use crate::{jws, Compact, JWE};
 
     fn cek_oct_key(len: usize) -> jwk::JWK<Empty> {
         // Construct the encryption key
@@ -561,7 +560,7 @@ mod tests {
         // Construct the JWE
         let payload =
             String::from("The true sign of intelligence is not knowledge but imagination.");
-        let jwe = Decrypted::new(
+        let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
                 cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
@@ -598,10 +597,7 @@ mod tests {
             KeyManagementAlgorithm::A256GCMKW,
             ContentEncryptionAlgorithm::A256GCM
         ));
-        assert_eq!(jwe, decrypted_jwe);
-
-        let decrypted_str = decrypted_jwe.payload;
-        assert_eq!(decrypted_str, payload);
+        assert_eq!(payload, decrypted_jwe.payload);
     }
 
     #[test]
@@ -632,7 +628,7 @@ mod tests {
         let key = cek_oct_key(256 / 8);
 
         // Construct the JWE
-        let jwe = Decrypted::new(
+        let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
                 cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
@@ -642,12 +638,10 @@ mod tests {
             }),
             jws.clone(),
         );
-        let options = EncryptionOptions::AES_GCM {
-            nonce: random_aes_gcm_nonce().unwrap(),
-        };
+        jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         {
             // Check that new header values are added
@@ -667,16 +661,13 @@ mod tests {
         assert_eq!(deserialized_json, encrypted_jwe);
 
         // Decrypt
-        let decrypted_jwe = not_err!(Decrypted::decrypt(
+        let decrypted_jwe = not_err!(JWE::<Empty>::decrypt(
             &encrypted_jwe,
             &key,
             KeyManagementAlgorithm::A256GCMKW,
             ContentEncryptionAlgorithm::A256GCM
         ));
-        assert_eq!(jwe, decrypted_jwe);
-
-        let decrypted_jws = decrypted_jwe.payload;
-        assert_eq!(jws, decrypted_jws);
+        assert_eq!(jws, decrypted_jwe.payload);
     }
 
     #[test]
@@ -742,16 +733,13 @@ mod tests {
         assert_eq!(deserialized_json, encrypted_jwe);
 
         // Decrypt
-        let decrypted_jwe = not_err!(Decrypted::decrypt(
+        let decrypted_jwe = not_err!(JWE::<Empty>::decrypt(
             &encrypted_jwe,
             &key,
             KeyManagementAlgorithm::DirectSymmetricKey,
             ContentEncryptionAlgorithm::A256GCM
         ));
-        assert_eq!(jwe, decrypted_jwe);
-
-        let decrypted_jws = decrypted_jwe.payload;
-        assert_eq!(jws, decrypted_jws);
+        assert_eq!(jws, decrypted_jwe.payload);
     }
 
     #[test]
@@ -762,7 +750,7 @@ mod tests {
 
         // Construct the JWE
         let payload = "The true sign of intelligence is not knowledge but imagination.";
-        let jwe = Decrypted::new(
+        let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
                 cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
@@ -770,12 +758,10 @@ mod tests {
             }),
             payload.as_bytes().to_vec(),
         );
-        let options = EncryptionOptions::AES_GCM {
-            nonce: random_aes_gcm_nonce().unwrap(),
-        };
+        jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
@@ -794,7 +780,7 @@ mod tests {
 
         // Construct the JWE
         let payload = "The true sign of intelligence is not knowledge but imagination.";
-        let jwe = Decrypted::new(
+        let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
                 cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
@@ -802,12 +788,10 @@ mod tests {
             }),
             payload.as_bytes().to_vec(),
         );
+        jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
-        let options = EncryptionOptions::AES_GCM {
-            nonce: random_aes_gcm_nonce().unwrap(),
-        };
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
             &encrypted_jwe,
@@ -840,7 +824,7 @@ mod tests {
 
         // Construct the JWE
         let payload = "The true sign of intelligence is not knowledge but imagination.";
-        let jwe = Decrypted::new(
+        let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
                 cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
@@ -848,12 +832,10 @@ mod tests {
             }),
             payload.as_bytes().to_vec(),
         );
+        jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
-        let options = EncryptionOptions::AES_GCM {
-            nonce: random_aes_gcm_nonce().unwrap(),
-        };
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
         let mut header: Header<Empty> = encrypted_jwe.deser_part(0).unwrap();
@@ -871,7 +853,7 @@ mod tests {
         );
 
         let encrypted_jwe = Compact::decode(&s);
-        let _: Decrypted<Vec<u8>, Empty> = Decrypted::decrypt(
+        let _ = Decrypted::<Vec<u8>, Empty>::decrypt(
             &encrypted_jwe,
             &key,
             KeyManagementAlgorithm::A256GCMKW,
@@ -888,7 +870,7 @@ mod tests {
 
         // Construct the JWE
         let payload = "The true sign of intelligence is not knowledge but imagination.";
-        let jwe = Decrypted::new(
+        let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
                 cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
@@ -896,12 +878,10 @@ mod tests {
             }),
             payload.as_bytes().to_vec(),
         );
+        jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
-        let options = EncryptionOptions::AES_GCM {
-            nonce: random_aes_gcm_nonce().unwrap(),
-        };
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
         let mut header: Header<Empty> = encrypted_jwe.deser_part(0).unwrap();
@@ -936,7 +916,7 @@ mod tests {
 
         // Construct the JWE
         let payload = "The true sign of intelligence is not knowledge but imagination.";
-        let jwe = Decrypted::new(
+        let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
                 cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
@@ -944,12 +924,10 @@ mod tests {
             }),
             payload.as_bytes().to_vec(),
         );
+        jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
-        let options = EncryptionOptions::AES_GCM {
-            nonce: random_aes_gcm_nonce().unwrap(),
-        };
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
         let s = format!(
@@ -980,7 +958,7 @@ mod tests {
 
         // Construct the JWE
         let payload = "The true sign of intelligence is not knowledge but imagination.";
-        let jwe = Decrypted::new(
+        let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
                 cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
@@ -988,12 +966,10 @@ mod tests {
             }),
             payload.as_bytes().to_vec(),
         );
-        let options = EncryptionOptions::AES_GCM {
-            nonce: random_aes_gcm_nonce().unwrap(),
-        };
+        jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
         let mut header: Header<Empty> = encrypted_jwe.deser_part(0).unwrap();
@@ -1029,7 +1005,7 @@ mod tests {
 
         // Construct the JWE
         let payload = "The true sign of intelligence is not knowledge but imagination.";
-        let jwe = Decrypted::new(
+        let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
                 cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
@@ -1037,12 +1013,10 @@ mod tests {
             }),
             payload.as_bytes().to_vec(),
         );
+        jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
-        let options = EncryptionOptions::AES_GCM {
-            nonce: random_aes_gcm_nonce().unwrap(),
-        };
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
         let s = format!(
@@ -1073,7 +1047,7 @@ mod tests {
 
         // Construct the JWE
         let payload = "The true sign of intelligence is not knowledge but imagination.";
-        let jwe = Decrypted::new(
+        let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
                 cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
@@ -1081,12 +1055,10 @@ mod tests {
             }),
             payload.as_bytes().to_vec(),
         );
-        let options = EncryptionOptions::AES_GCM {
-            nonce: random_aes_gcm_nonce().unwrap(),
-        };
+        jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
         let s = format!(
@@ -1117,7 +1089,7 @@ mod tests {
 
         // Construct the JWE
         let payload = "The true sign of intelligence is not knowledge but imagination.";
-        let jwe = Decrypted::new(
+        let mut jwe = Decrypted::new(
             From::from(RegisteredHeader {
                 cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
                 enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
@@ -1125,12 +1097,10 @@ mod tests {
             }),
             payload.as_bytes().to_vec(),
         );
-        let options = EncryptionOptions::AES_GCM {
-            nonce: random_aes_gcm_nonce().unwrap(),
-        };
+        jwe.header.cek_algorithm.nonce = Some(random_aes_gcm_nonce().unwrap());
 
         // Encrypt
-        let encrypted_jwe = not_err!(jwe.encrypt(&key, &options));
+        let encrypted_jwe = not_err!(jwe.encrypt(&key, &EncryptionOptions::None));
 
         // Modify the JWE
         let s = format!(
