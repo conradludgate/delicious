@@ -48,7 +48,7 @@ impl<B: Send> FromRequest<B> for Session {
                 .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
             if let Ok(session) =
-                Decoded::<Session, ()>::decode_json(&cache.0, secret, SignatureAlgorithm::HS256)
+                Decoded::<Session, ()>::decode_json(cache.0, secret, SignatureAlgorithm::HS256)
             {
                 return Ok(session.payload);
             }
@@ -57,7 +57,7 @@ impl<B: Send> FromRequest<B> for Session {
     }
 }
 
-pub struct UmamiCache(delicious_jose::Compact);
+pub struct UmamiCache(delicious_jose::jws::Encoded<delicious_jose::Json<Session>>);
 
 impl Header for UmamiCache {
     fn name() -> &'static HeaderName {
@@ -71,7 +71,7 @@ impl Header for UmamiCache {
         values
             .next()
             .and_then(|v| v.to_str().ok())
-            .map(delicious_jose::Compact::decode)
+            .and_then(|v| v.parse().ok())
             .map(UmamiCache)
             .ok_or_else(headers_core::Error::invalid)
     }
@@ -79,7 +79,7 @@ impl Header for UmamiCache {
     fn encode<E: Extend<HeaderValue>>(&self, values: &mut E) {
         let value = self
             .0
-            .as_str()
+            .to_string()
             .parse()
             .expect("Mime is always a valid HeaderValue");
         values.extend(::std::iter::once(value));

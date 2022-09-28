@@ -2,7 +2,7 @@
 mod compact;
 mod flattened;
 
-pub use compact::Decoded;
+pub use compact::{Decoded, Encoded};
 pub use flattened::{Signable, SignedData};
 use serde::de::DeserializeOwned;
 

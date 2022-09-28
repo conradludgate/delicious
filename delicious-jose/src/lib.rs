@@ -76,13 +76,12 @@
 #![doc(test(attr(allow(unused_variables), deny(warnings))))]
 
 use std::borrow::{Borrow, Cow};
-use std::fmt::{self, Debug, Display};
+use std::fmt::Debug;
 use std::iter;
 use std::ops::Deref;
 
-use serde::de::{self, DeserializeOwned};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use smallvec::SmallVec;
 use time::{Duration, OffsetDateTime};
 
 mod helpers;
@@ -129,16 +128,6 @@ impl<T: Serialize + DeserializeOwned> CompactPart for Json<T> {
 
     fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
         Ok(serde_json::to_vec(&self.0)?.into())
-    }
-}
-
-impl CompactPart for Compact {
-    fn from_bytes(b: &[u8]) -> Result<Self, Error> {
-        Ok(Compact::decode(std::str::from_utf8(b)?))
-    }
-
-    fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
-        Ok(self.as_str().as_bytes().into())
     }
 }
 
@@ -357,165 +346,7 @@ pub type JWT<T> = jws::Decoded<ClaimsSet<T>, ()>;
 /// nonce_counter = nonce_counter + 1u8;
 /// # }
 /// ```
-pub type JWE = jwe::Decrypted<Compact, ()>;
-
-/// A collection of `CompactPart`s that have been converted to `Base64Url`
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Compact {
-    source: String,
-    indices: SmallVec<[usize; 5]>,
-}
-
-impl Compact {
-    /// Create an empty struct
-    pub fn new() -> Self {
-        Self {
-            source: String::new(),
-            indices: SmallVec::new(),
-        }
-    }
-
-    /// Push a `CompactPart` to the end
-    pub fn push(&mut self, part: &impl CompactPart) -> Result<(), Error> {
-        self.push_base64(&*part.to_base64()?);
-        Ok(())
-    }
-
-    pub(crate) fn push_bytes(&mut self, input: &[u8]) {
-        base64::encode_config_buf(input, base64::URL_SAFE_NO_PAD, &mut self.source);
-
-        // push ending index
-        self.indices.push(self.source.len());
-        self.source.push('.');
-    }
-
-    /// Push a `CompactPart` to the end
-    pub(crate) fn push_base64(&mut self, input: &str) {
-        self.source.push_str(input);
-        self.indices.push(self.source.len());
-        self.source.push('.');
-    }
-
-    /// Returns the number of parts
-    pub fn len(&self) -> usize {
-        self.indices.len()
-    }
-
-    /// Returns whether there are no parts
-    pub fn is_empty(&self) -> bool {
-        self.indices.is_empty() && self.source.is_empty()
-    }
-
-    /// Encodes the various parts into Base64 URL encoding and then concatenates them with period '.'
-    /// This corresponds to the various `Compact` representation in JWE and JWS, for example
-    pub fn into_inner(mut self) -> String {
-        let _ = self.source.pop();
-        self.source
-    }
-
-    /// Encodes the various parts into Base64 URL encoding and then concatenates them with period '.'
-    /// This corresponds to the various `Compact` representation in JWE and JWS, for example
-    pub fn as_str(&self) -> &str {
-        let end = self.source.len().saturating_sub(1);
-        &self.source[..end]
-    }
-
-    /// Convenience function to split an encoded compact representation into a list of `Base64Url`.
-    pub fn decode(source: &str) -> Self {
-        let mut indices = SmallVec::new();
-        let mut source = source.to_owned();
-
-        if !source.is_empty() {
-            source.push('.');
-            for (i, _) in source.match_indices('.') {
-                indices.push(i);
-            }
-        }
-
-        Self { source, indices }
-    }
-
-    /// Convenience function to retrieve a part at a certain index and decode into the type desired
-    pub(crate) fn part_base64(&self, index: usize) -> Result<&str, Error> {
-        let end = *self
-            .indices
-            .get(index)
-            .ok_or_else(|| "Out of bounds".to_string())?;
-        let start = match index.checked_sub(1) {
-            Some(i) => self.indices[i] + 1,
-            None => 0,
-        };
-        Ok(&self.source[start..end])
-    }
-
-    /// Convenience function to retrieve a part at a certain index and decode into the type desired
-    pub fn part<T: CompactPart>(&self, index: usize) -> Result<T, Error> {
-        T::from_base64(self.part_base64(index)?)
-    }
-
-    pub(crate) fn parse_triple(&self) -> Result<(&str, Vec<u8>), Error> {
-        match self.indices.as_slice() {
-            [_, x, y] => {
-                let decode =
-                    base64::decode_config(&self.source[x + 1..*y], base64::URL_SAFE_NO_PAD)?;
-                Ok((&self.source[..*x], decode))
-            }
-            _ => Err(Error::DecodeError(
-                crate::errors::DecodeError::PartsLengthError {
-                    actual: self.len(),
-                    expected: 3,
-                },
-            )),
-        }
-    }
-}
-
-impl Default for Compact {
-    fn default() -> Self {
-        Compact::new()
-    }
-}
-
-impl Display for Compact {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl Serialize for Compact {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for Compact {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct CompactVisitor;
-
-        impl<'de> de::Visitor<'de> for CompactVisitor {
-            type Value = Compact;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a string containing a compact JOSE representation")
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(Compact::decode(value))
-            }
-        }
-
-        deserializer.deserialize_str(CompactVisitor)
-    }
-}
+pub type JWE = jwe::Decrypted<jws::Encoded<()>, ()>;
 
 /// Represents a choice between a single value or multiple values.
 /// This value is serialized by serde [untagged](https://serde.rs/enum-representations.html).
