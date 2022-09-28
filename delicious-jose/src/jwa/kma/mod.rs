@@ -9,8 +9,8 @@ use super::ContentEncryptionAlgorithm;
 pub(crate) mod aes_gcm;
 mod pbes2_aes_kw;
 
-pub use aes_gcm::AES_GCM;
-pub use pbes2_aes_kw::PBES2;
+pub use self::aes_gcm::{AES_GCM, A128GCMKW, A256GCMKW};
+pub use pbes2_aes_kw::{PBES2, PBES2_HS256_A128KW, PBES2_HS384_A192KW, PBES2_HS512_A256KW};
 
 /// Algorithms for key management as defined in [RFC7518#4](https://tools.ietf.org/html/rfc7518#section-4)
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -210,6 +210,31 @@ impl Algorithm {
         }
     }
 }
+
+pub trait KMA {
+    /// Key used to derive the Cek
+    type Key;
+    /// Content Encryption Key
+    type Cek;
+    /// Values to store in the header, used to unwrap the Cek
+    type AlgorithmHeader;
+    /// Settings used to wrap the key
+    type WrapSettings;
+
+    fn wrap(
+        cek: Self::Cek,
+        key: &Self::Key,
+        settings: Self::WrapSettings,
+    ) -> Result<(Vec<u8>, Self::AlgorithmHeader), Error>;
+    fn unwrap(
+        encrypted_cek: &[u8],
+        key: &Self::Key,
+        settings: Self::AlgorithmHeader,
+    ) -> Result<Self::Cek, Error>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OctetKey(Vec<u8>);
 
 #[cfg(test)]
 mod tests {

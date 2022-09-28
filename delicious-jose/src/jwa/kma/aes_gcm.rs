@@ -1,5 +1,8 @@
 use crate::{errors::Error, jwa::EncryptionResult};
+use ::aead::{AeadInPlace, KeyInit, generic_array::{GenericArray, ArrayLength}};
 use ring::aead;
+
+use super::{OctetKey, KMA};
 
 /// Key wrapping with AES GCM. [RFC7518#4.7](https://tools.ietf.org/html/rfc7518#section-4.7)
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -12,6 +15,113 @@ pub enum AES_GCM {
     A192,
     /// Key wrapping with AES GCM using 256-bit key alg
     A256,
+}
+
+#[allow(non_camel_case_types)]
+pub struct A128GCMKW;
+#[allow(non_camel_case_types)]
+pub struct A256GCMKW;
+
+// trait AES_GCM {
+
+// }
+
+#[allow(non_camel_case_types)]
+pub struct AES_GCM_Header {
+    nonce: Vec<u8>,
+    tag: Vec<u8>,
+}
+
+impl KMA for A128GCMKW {
+    type Key = OctetKey;
+    type Cek = OctetKey;
+    type AlgorithmHeader = AES_GCM_Header;
+    type WrapSettings = Vec<u8>;
+
+    fn wrap(
+        cek: Self::Cek,
+        key: &Self::Key,
+        settings: Self::WrapSettings,
+    ) -> Result<(Vec<u8>, Self::AlgorithmHeader), Error> {
+        let cipher = aes_gcm::Aes128Gcm::new_from_slice(&key.0)?;
+        let nonce = aes_gcm::Nonce::from_slice(&settings);
+        let mut in_out: Vec<u8> = cek.0;
+        let tag = cipher
+            .encrypt_in_place_detached(nonce, &[], &mut in_out)
+            .map_err(|_| Error::UnspecifiedCryptographicError)?;
+
+        let header = AES_GCM_Header {
+            nonce: settings,
+            tag: tag.to_vec(),
+        };
+        Ok((in_out, header))
+    }
+
+    fn unwrap(
+        encrypted_cek: &[u8],
+        key: &Self::Key,
+        header: Self::AlgorithmHeader,
+    ) -> Result<Self::Cek, Error> {
+        let cipher = aes_gcm::Aes128Gcm::new_from_slice(&key.0)?;
+        let nonce = aes_gcm::Nonce::from_slice(&header.nonce);
+        let tag = aes_gcm::Tag::from_slice(&header.tag);
+        let mut in_out: Vec<u8> = encrypted_cek.to_vec();
+        cipher
+            .decrypt_in_place_detached(nonce, &[], &mut in_out, tag)
+            .map_err(|_| Error::UnspecifiedCryptographicError)?;
+
+        Ok(OctetKey(in_out))
+    }
+}
+
+impl KMA for A256GCMKW {
+    type Key = OctetKey;
+    type Cek = OctetKey;
+    type AlgorithmHeader = AES_GCM_Header;
+    type WrapSettings = Vec<u8>;
+
+    fn wrap(
+        cek: Self::Cek,
+        key: &Self::Key,
+        settings: Self::WrapSettings,
+    ) -> Result<(Vec<u8>, Self::AlgorithmHeader), Error> {
+        let cipher = aes_gcm::Aes256Gcm::new_from_slice(&key.0)?;
+        let nonce = from_slice(&settings)?;
+        let mut in_out: Vec<u8> = cek.0;
+        let tag = cipher
+            .encrypt_in_place_detached(nonce, &[], &mut in_out)
+            .map_err(|_| Error::UnspecifiedCryptographicError)?;
+
+        let header = AES_GCM_Header {
+            nonce: settings,
+            tag: tag.to_vec(),
+        };
+        Ok((in_out, header))
+    }
+
+    fn unwrap(
+        encrypted_cek: &[u8],
+        key: &Self::Key,
+        header: Self::AlgorithmHeader,
+    ) -> Result<Self::Cek, Error> {
+        let cipher = aes_gcm::Aes256Gcm::new_from_slice(&key.0)?;
+        let nonce = from_slice(&header.nonce)?;
+        let tag = from_slice(&header.tag)?;
+        let mut in_out: Vec<u8> = encrypted_cek.to_vec();
+        cipher
+            .decrypt_in_place_detached(nonce, &[], &mut in_out, tag)
+            .map_err(|_| Error::UnspecifiedCryptographicError)?;
+
+        Ok(OctetKey(in_out))
+    }
+}
+
+fn from_slice<Size: ArrayLength<u8>>(x: &[u8]) -> Result<&GenericArray<u8, Size>, Error> {
+    if x.len() != Size::to_usize() {
+        Err(Error::UnspecifiedCryptographicError)
+    } else {
+        Ok(GenericArray::from_slice(x))
+    }
 }
 
 impl From<AES_GCM> for super::Algorithm {
@@ -29,13 +139,21 @@ impl AES_GCM {
     ) -> Result<EncryptionResult, Error> {
         use AES_GCM::{A128, A256};
 
-        let algorithm = match self {
-            A128 => &aead::AES_128_GCM,
-            A256 => &aead::AES_256_GCM,
+        let cek = OctetKey(payload.to_vec());
+        let key = OctetKey(key.to_vec());
+        let nonce = nonce.to_vec();
+        let (cek, header) = match self {
+            A128 => A128GCMKW::wrap(cek, &key, nonce)?,
+            A256 => A256GCMKW::wrap(cek, &key, nonce)?,
             _ => Err(Error::UnsupportedOperation)?,
         };
 
-        aes_gcm_encrypt(algorithm, payload, nonce, &[], key)
+        Ok(EncryptionResult {
+            nonce: header.nonce,
+            encrypted: cek,
+            tag: header.tag,
+            additional_data: Vec::new(),
+        })
     }
 
     pub(crate) fn aes_gcm_decrypt(
@@ -45,13 +163,16 @@ impl AES_GCM {
     ) -> Result<Vec<u8>, Error> {
         use AES_GCM::{A128, A256};
 
-        let algorithm = match self {
-            A128 => &aead::AES_128_GCM,
-            A256 => &aead::AES_256_GCM,
+        let key = OctetKey(key.to_vec());
+        let header = AES_GCM_Header {
+            tag: encrypted.tag.to_owned(),
+            nonce: encrypted.nonce.to_owned(),
+        };
+        let cek = match self {
+            A128 => A128GCMKW::unwrap(&encrypted.encrypted, &key, header)?.0,
+            A256 => A256GCMKW::unwrap(&encrypted.encrypted, &key, header)?.0,
             _ => Err(Error::UnsupportedOperation)?,
         };
-
-        let cek = aes_gcm_decrypt(algorithm, encrypted, key)?;
         Ok(cek)
     }
 }
