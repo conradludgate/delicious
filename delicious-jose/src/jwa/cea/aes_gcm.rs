@@ -5,11 +5,8 @@ use aead::{
     AeadInPlace, KeyInit,
 };
 
-use super::CEA;
-use crate::{
-    jwa::{EncryptionResult, OctetKey},
-    Error,
-};
+use super::{EncryptionResult, CEA};
+use crate::{jwa::OctetKey, Error};
 
 /// [Content Encryption with AES GCM](https://datatracker.ietf.org/doc/html/rfc7518#section-5.3)
 ///
@@ -69,8 +66,7 @@ macro_rules! aes_gcm {
         }
 
         impl CEA for $id {
-            const ENC: super::super::ContentEncryptionAlgorithm =
-                super::super::ContentEncryptionAlgorithm::$name;
+            const ENC: super::Algorithm = super::Algorithm::$name;
             type Cek = OctetKey;
             const IV: usize = 96 / 8;
 
@@ -116,24 +112,39 @@ fn from_slice<Size: ArrayLength<u8>>(x: &[u8]) -> Result<&GenericArray<u8, Size>
 
 #[cfg(test)]
 mod tests {
-    use ring::rand::{SecureRandom, SystemRandom};
+    use crate::test::random_vec;
 
     use super::*;
+
+    /// `ContentEncryptionAlgorithm::A128GCM` generates CEK of the right length
+    #[test]
+    fn aes128gcm_key_length() {
+        assert_eq!(A128GCM::generate_cek().as_bytes().len(), 128 / 8);
+    }
+
+    /// `ContentEncryptionAlgorithm::A256GCM` generates CEK of the right length
+    #[test]
+    fn aes256gcm_key_length() {
+        assert_eq!(A256GCM::generate_cek().as_bytes().len(), 256 / 8);
+    }
+
+    pub fn nonce() -> Vec<u8> {
+        random_vec(12)
+    }
 
     #[test]
     fn aes_gcm_128_encryption_round_trip_fixed_key_nonce() {
         let payload = "这个世界值得我们奋战！";
         let key = OctetKey(vec![0; 128 / 8]);
-        cea_round_trip::<A128GCM>(&key, payload.as_bytes(), vec![0; 12], vec![]);
+        cea_round_trip::<A128GCM>(&key, payload.as_bytes(), vec![0; 12], nonce());
     }
 
     #[test]
     fn aes_gcm_128_encryption_round_trip() {
         let payload = "这个世界值得我们奋战！";
-        let mut key = OctetKey(vec![0; 128 / 8]);
-        SystemRandom::new().fill(&mut key.0).unwrap();
+        let key = OctetKey(random_vec(128 / 8));
 
-        cea_round_trip::<A128GCM>(&key, payload.as_bytes(), vec![0; 12], vec![]);
+        cea_round_trip::<A128GCM>(&key, payload.as_bytes(), vec![0; 12], nonce());
     }
 
     #[test]
@@ -141,16 +152,15 @@ mod tests {
         let payload = "这个世界值得我们奋战！";
         let key = OctetKey(vec![0; 256 / 8]);
 
-        cea_round_trip::<A256GCM>(&key, payload.as_bytes(), vec![0; 12], vec![]);
+        cea_round_trip::<A256GCM>(&key, payload.as_bytes(), vec![0; 12], nonce());
     }
 
     #[test]
     fn aes_gcm_256_encryption_round_trip() {
         let payload = "这个世界值得我们奋战！";
-        let mut key = OctetKey(vec![0; 256 / 8]);
-        SystemRandom::new().fill(&mut key.0).unwrap();
+        let key = OctetKey(random_vec(256 / 8));
 
-        cea_round_trip::<A256GCM>(&key, payload.as_bytes(), vec![0; 12], vec![]);
+        cea_round_trip::<A256GCM>(&key, payload.as_bytes(), vec![0; 12], nonce());
     }
 
     fn cea_round_trip<C: CEA>(key: &C::Cek, payload: &[u8], iv: Vec<u8>, aad: Vec<u8>)

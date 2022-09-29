@@ -817,10 +817,10 @@ mod tests {
         };
         let expected_json = r#"{"values":"foobar"}"#;
 
-        let serialized = not_err!(serde_json::to_string(&test));
+        let serialized = serde_json::to_string(&test).unwrap();
         assert_eq!(expected_json, serialized);
 
-        let deserialized: SingleOrMultipleStrings = not_err!(serde_json::from_str(&serialized));
+        let deserialized: SingleOrMultipleStrings = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, test);
         assert!(deserialized.values.contains("foobar"));
         assert!(!deserialized.values.contains("does not exist"));
@@ -837,10 +837,10 @@ mod tests {
         };
         let expected_json = r#"{"values":["foo","bar","baz"]}"#;
 
-        let serialized = not_err!(serde_json::to_string(&test));
+        let serialized = serde_json::to_string(&test).unwrap();
         assert_eq!(expected_json, serialized);
 
-        let deserialized: SingleOrMultipleStrings = not_err!(serde_json::from_str(&serialized));
+        let deserialized: SingleOrMultipleStrings = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, test);
         assert!(deserialized.values.contains("foo"));
         assert!(deserialized.values.contains("bar"));
@@ -851,14 +851,14 @@ mod tests {
     #[test]
     fn single_string_or_uri_string_serialization_round_trip() {
         let test = SingleOrMultipleStrings {
-            values: SingleOrMultiple::Single(not_err!(FromStr::from_str("foobar"))),
+            values: SingleOrMultiple::Single(FromStr::from_str("foobar").unwrap()),
         };
         let expected_json = r#"{"values":"foobar"}"#;
 
-        let serialized = not_err!(serde_json::to_string(&test));
+        let serialized = serde_json::to_string(&test).unwrap();
         assert_eq!(expected_json, serialized);
 
-        let deserialized: SingleOrMultipleStrings = not_err!(serde_json::from_str(&serialized));
+        let deserialized: SingleOrMultipleStrings = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, test);
         assert!(deserialized.values.contains("foobar"));
         assert!(!deserialized.values.contains("does not exist"));
@@ -867,16 +867,16 @@ mod tests {
     #[test]
     fn single_string_or_uri_uri_serialization_round_trip() {
         let test = SingleOrMultipleStrings {
-            values: SingleOrMultiple::Single(not_err!(FromStr::from_str(
-                "https://www.examples.com/"
-            ))),
+            values: SingleOrMultiple::Single(
+                FromStr::from_str("https://www.examples.com/").unwrap(),
+            ),
         };
         let expected_json = r#"{"values":"https://www.examples.com/"}"#;
 
-        let serialized = not_err!(serde_json::to_string(&test));
+        let serialized = serde_json::to_string(&test).unwrap();
         assert_eq!(expected_json, serialized);
 
-        let deserialized: SingleOrMultipleStrings = not_err!(serde_json::from_str(&serialized));
+        let deserialized: SingleOrMultipleStrings = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, test);
         assert!(deserialized.values.contains("https://www.examples.com/"));
         assert!(!deserialized.values.contains("https://ecorp.com"));
@@ -886,19 +886,19 @@ mod tests {
     fn multiple_string_or_uri_serialization_round_trip() {
         let test = SingleOrMultipleStrings {
             values: SingleOrMultiple::Multiple(vec![
-                not_err!(FromStr::from_str("foo")),
-                not_err!(FromStr::from_str("https://www.example.com/")),
-                not_err!(FromStr::from_str("data:text/plain,Hello?World#")),
-                not_err!(FromStr::from_str("http://[::1]/")),
-                not_err!(FromStr::from_str("baz")),
+                FromStr::from_str("foo").unwrap(),
+                FromStr::from_str("https://www.example.com/").unwrap(),
+                FromStr::from_str("data:text/plain,Hello?World#").unwrap(),
+                FromStr::from_str("http://[::1]/").unwrap(),
+                FromStr::from_str("baz").unwrap(),
             ]),
         };
         let expected_json = r#"{"values":["foo","https://www.example.com/","data:text/plain,Hello?World#","http://[::1]/","baz"]}"#;
 
-        let serialized = not_err!(serde_json::to_string(&test));
+        let serialized = serde_json::to_string(&test).unwrap();
         assert_eq!(expected_json, serialized);
 
-        let deserialized: SingleOrMultipleStrings = not_err!(serde_json::from_str(&serialized));
+        let deserialized: SingleOrMultipleStrings = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, test);
 
         assert!(deserialized.values.contains("foo"));
@@ -915,14 +915,14 @@ mod tests {
             .replace_nanosecond(0)
             .unwrap()
             .into();
-        let serialized = not_err!(serde_json::to_string(&now));
-        let deserialized = not_err!(serde_json::from_str(&serialized));
+        let serialized = serde_json::to_string(&now).unwrap();
+        let deserialized = serde_json::from_str(&serialized).unwrap();
         assert_eq!(now, deserialized);
 
         let fixed_time: Timestamp = 1000.try_into().unwrap();
-        let serialized = not_err!(serde_json::to_string(&fixed_time));
+        let serialized = serde_json::to_string(&fixed_time).unwrap();
         assert_eq!(serialized, "1000");
-        let deserialized = not_err!(serde_json::from_str(&serialized));
+        let deserialized = serde_json::from_str(&serialized).unwrap();
         assert_eq!(fixed_time, deserialized);
     }
 
@@ -931,30 +931,30 @@ mod tests {
         let claim = RegisteredClaims::default();
         let expected_json = "{}";
 
-        let serialized = not_err!(serde_json::to_string(&claim));
+        let serialized = serde_json::to_string(&claim).unwrap();
         assert_eq!(expected_json, serialized);
 
-        let deserialized: RegisteredClaims = not_err!(serde_json::from_str(&serialized));
+        let deserialized: RegisteredClaims = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, claim);
     }
 
     #[test]
     fn registered_claims_serialization_round_trip() {
         let claim = RegisteredClaims {
-            issuer: Some(not_err!(FromStr::from_str("https://www.acme.com/"))),
-            audience: Some(SingleOrMultiple::Single(not_err!(FromStr::from_str(
-                "htts://acme-customer.com/"
-            )))),
+            issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
+            audience: Some(SingleOrMultiple::Single(
+                FromStr::from_str("htts://acme-customer.com/").unwrap(),
+            )),
             not_before: Some(1234.try_into().unwrap()),
             ..Default::default()
         };
         let expected_json =
             r#"{"iss":"https://www.acme.com/","aud":"htts://acme-customer.com/","nbf":1234}"#;
 
-        let serialized = not_err!(serde_json::to_string(&claim));
+        let serialized = serde_json::to_string(&claim).unwrap();
         assert_eq!(expected_json, serialized);
 
-        let deserialized: RegisteredClaims = not_err!(serde_json::from_str(&serialized));
+        let deserialized: RegisteredClaims = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, claim);
     }
 
@@ -962,11 +962,11 @@ mod tests {
     fn claims_set_serialization_round_trip() {
         let claim = ClaimsSet::<PrivateClaims> {
             registered: RegisteredClaims {
-                issuer: Some(not_err!(FromStr::from_str("https://www.acme.com/"))),
-                subject: Some(not_err!(FromStr::from_str("John Doe"))),
-                audience: Some(SingleOrMultiple::Single(not_err!(FromStr::from_str(
-                    "htts://acme-customer.com/"
-                )))),
+                issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
+                subject: Some(FromStr::from_str("John Doe").unwrap()),
+                audience: Some(SingleOrMultiple::Single(
+                    FromStr::from_str("htts://acme-customer.com/").unwrap(),
+                )),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },
@@ -980,10 +980,10 @@ mod tests {
                              \"aud\":\"htts://acme-customer.com/\",\
                              \"nbf\":1234,\"company\":\"ACME\",\"department\":\"Toilet Cleaning\"}";
 
-        let serialized = not_err!(serde_json::to_string(&claim));
+        let serialized = serde_json::to_string(&claim).unwrap();
         assert_eq!(expected_json, serialized);
 
-        let deserialized: ClaimsSet<PrivateClaims> = not_err!(serde_json::from_str(&serialized));
+        let deserialized: ClaimsSet<PrivateClaims> = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, claim);
     }
 
@@ -992,11 +992,11 @@ mod tests {
     fn duplicate_claims_round_trip() {
         let claim = ClaimsSet::<InvalidPrivateClaim> {
             registered: RegisteredClaims {
-                issuer: Some(not_err!(FromStr::from_str("https://www.acme.com"))),
-                subject: Some(not_err!(FromStr::from_str("John Doe"))),
-                audience: Some(SingleOrMultiple::Single(not_err!(FromStr::from_str(
-                    "htts://acme-customer.com"
-                )))),
+                issuer: Some(FromStr::from_str("https://www.acme.com").unwrap()),
+                subject: Some(FromStr::from_str("John Doe").unwrap()),
+                audience: Some(SingleOrMultiple::Single(
+                    FromStr::from_str("htts://acme-customer.com").unwrap(),
+                )),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },
@@ -1189,7 +1189,7 @@ mod tests {
             ..Default::default()
         };
 
-        not_err!(registered_claims.validate(validation_options));
+        registered_claims.validate(validation_options).unwrap();
     }
 
     #[test]
@@ -1292,7 +1292,7 @@ mod tests {
             issuer: Validation::Validate("issuer".to_string()),
         };
 
-        not_err!(registered_claims.validate(validation_options));
+        registered_claims.validate(validation_options).unwrap();
     }
 
     #[test]
@@ -1320,6 +1320,6 @@ mod tests {
             ..Default::default()
         };
 
-        not_err!(registered_claims.validate(validation_options));
+        registered_claims.validate(validation_options).unwrap();
     }
 }

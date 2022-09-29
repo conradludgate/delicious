@@ -328,15 +328,7 @@ mod serde_impl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::RngCore;
-
-    use crate::jwa::cea;
-
-    pub fn random_vec(len: usize) -> Vec<u8> {
-        let mut nonce = vec![0; len];
-        rand::thread_rng().fill_bytes(&mut nonce);
-        nonce
-    }
+    use crate::{jwa::cea, test::random_vec};
 
     fn cek_oct_key(len: usize) -> OctetKey {
         OctetKey::new(random_vec(len))

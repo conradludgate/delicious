@@ -7,7 +7,7 @@ use axum::{
     TypedHeader,
 };
 use delicious_jose::{
-    jwa::{cea, kma, SignatureAlgorithm},
+    jwa::{cea, kma, sign},
     jwe::Encrypted,
     JWT,
 };
@@ -46,7 +46,7 @@ impl<B: Send> FromRequest<B> for Auth {
 
         let token: Encrypted<kma::PBES2_HS256_A128KW> = token.token().parse()?;
         let jwe = token.decrypt::<_, cea::A128CBC_HS256>(&secret.0)?;
-        let jwt = JWT::decode_json(jwe.payload, &secret.to_secret(), SignatureAlgorithm::HS256)?;
+        let jwt = JWT::decode_json(jwe.payload, &secret.to_secret(), sign::Algorithm::HS256)?;
         Ok(jwt.payload.private)
     }
 }

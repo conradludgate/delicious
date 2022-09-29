@@ -5,7 +5,7 @@ use axum::{
     Json, TypedHeader,
 };
 use delicious_jose::{
-    jwa::SignatureAlgorithm,
+    jwa::sign,
     jws::{Decoded, Secret},
 };
 use headers_core::{Header, HeaderName, HeaderValue};
@@ -48,7 +48,7 @@ impl<B: Send> FromRequest<B> for Session {
                 .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
             if let Ok(session) =
-                Decoded::<Session, ()>::decode_json(cache.0, secret, SignatureAlgorithm::HS256)
+                Decoded::<Session, ()>::decode_json(cache.0, secret, sign::Algorithm::HS256)
             {
                 return Ok(session.payload);
             }

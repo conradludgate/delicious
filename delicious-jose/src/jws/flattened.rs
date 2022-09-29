@@ -8,7 +8,7 @@
 
 use super::{Header, RegisteredHeader, Secret};
 use crate::errors::{Error, ValidationError};
-use crate::jwa::SignatureAlgorithm;
+use crate::jwa::sign;
 use crate::serde_custom;
 use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 
@@ -45,10 +45,10 @@ fn signing_input(protected_header: &[u8], payload: &[u8]) -> Vec<u8> {
 /// # Examples
 /// ```
 /// use biscuit::jws::{Header, RegisteredHeader, Signable};
-/// use biscuit::jwa::SignatureAlgorithm;
+/// use biscuit::jwa::sign;
 /// use biscuit::();
 /// let header = Header::<()>::from(RegisteredHeader {
-///     algorithm: SignatureAlgorithm::ES256,
+///     algorithm: sign::Algorithm::ES256,
 ///     ..Default::default()
 /// });
 /// let payload = b"These bytes cannot be altered";
@@ -154,14 +154,14 @@ impl SignedData {
     ///
     /// # Example
     /// ```
-    /// use biscuit::jwa::SignatureAlgorithm;
+    /// use biscuit::jwa::sign::Algorithm;
     /// use biscuit::jws::{Header, RegisteredHeader, Secret, Signable, SignedData};
     /// use biscuit::();
     /// use ring::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair};
     /// use std::sync::Arc;
     ///
     /// let header = Header::<()>::from(RegisteredHeader {
-    ///     algorithm: SignatureAlgorithm::ES256,
+    ///     algorithm: sign::Algorithm::ES256,
     ///     ..Default::default()
     /// });
     /// let payload = b"These bytes cannot be altered";
@@ -210,7 +210,7 @@ impl SignedData {
     ///
     /// # Example
     /// ```
-    /// use biscuit::jwa::SignatureAlgorithm;
+    /// use biscuit::jwa::sign::Algorithm;
     /// use biscuit::jws::{Secret, SignedData};
     /// use data_encoding::HEXUPPER;
     /// let public_key =
@@ -224,14 +224,14 @@ impl SignedData {
     /// let signed = SignedData::verify_flattened(
     ///     jwt.as_bytes(),
     ///     secret,
-    ///     SignatureAlgorithm::ES256
+    ///     sign::Algorithm::ES256
     /// )?;
     /// # Ok::<(), biscuit::errors::Error>(())
     /// ```
     pub fn verify_flattened(
         data: &[u8],
         secret: &Secret,
-        algorithm: SignatureAlgorithm,
+        algorithm: sign::Algorithm,
     ) -> Result<Self, Error> {
         let raw: FlattenedRaw = serde_json::from_slice(data)?;
         algorithm
@@ -312,7 +312,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use super::{Header, Secret, Signable, SignedData};
-    use crate::jwa::SignatureAlgorithm;
+    use crate::jwa::sign;
     use crate::jws::RegisteredHeader;
     use crate::{ClaimsSet, RegisteredClaims, SingleOrMultiple};
 
@@ -334,22 +334,23 @@ mod tests {
 
     #[test]
     fn flattened_jws_round_trip_none() {
-        let expected_value = not_err!(serde_json::to_value(
+        let expected_value = serde_json::to_value(
             "{\"protected\":\"eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0\",\
             \"payload\":\"eyJpc3MiOiJodHRwczovL3d3dy5hY21lLmNvbS8iLCJz\
             dWIiOiJKb2huIERvZSIsImF1ZCI6Imh0dHBzOi8vYWNtZS1jdXN0b21lci5j\
             b20vIiwibmJmIjoxMjM0LCJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQi\
             OiJUb2lsZXQgQ2xlYW5pbmcifQ\",\
-            \"signature\":\"\"}"
-        ));
+            \"signature\":\"\"}",
+        )
+        .unwrap();
 
         let expected_claims = ClaimsSet::<PrivateClaims> {
             registered: RegisteredClaims {
-                issuer: Some(not_err!(FromStr::from_str("https://www.acme.com/"))),
-                subject: Some(not_err!(FromStr::from_str("John Doe"))),
-                audience: Some(SingleOrMultiple::Single(not_err!(FromStr::from_str(
-                    "https://acme-customer.com/"
-                )))),
+                issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
+                subject: Some(FromStr::from_str("John Doe").unwrap()),
+                audience: Some(SingleOrMultiple::Single(
+                    FromStr::from_str("https://acme-customer.com/").unwrap(),
+                )),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },
@@ -359,26 +360,26 @@ mod tests {
             },
         };
 
-        let expected_jwt = not_err!(SignedData::sign(
-            not_err!(Signable::new::<()>(
+        let expected_jwt = SignedData::sign(
+            Signable::new::<()>(
                 From::from(RegisteredHeader {
-                    algorithm: SignatureAlgorithm::None,
+                    algorithm: sign::Algorithm::None,
                     ..Default::default()
                 }),
                 serde_json::to_vec(&expected_claims).unwrap(),
-            )),
+            )
+            .unwrap(),
             &Secret::None,
-        ));
+        )
+        .unwrap();
         let token = expected_jwt.serialize_flattened();
-        assert_eq!(expected_value, not_err!(serde_json::to_value(&token)));
+        assert_eq!(expected_value, serde_json::to_value(&token).unwrap());
 
-        let biscuit: SignedData = not_err!(SignedData::verify_flattened(
-            token.as_bytes(),
-            &Secret::None,
-            SignatureAlgorithm::None,
-        ));
+        let biscuit: SignedData =
+            SignedData::verify_flattened(token.as_bytes(), &Secret::None, sign::Algorithm::None)
+                .unwrap();
         let actual_claims: ClaimsSet<PrivateClaims> =
-            not_err!(biscuit.data().deserialize_json_payload());
+            biscuit.data().deserialize_json_payload().unwrap();
         assert_eq!(&expected_claims, &actual_claims);
     }
 
@@ -386,11 +387,11 @@ mod tests {
     fn flattened_jws_round_trip_hs256() {
         let expected_claims = ClaimsSet::<PrivateClaims> {
             registered: RegisteredClaims {
-                issuer: Some(not_err!(FromStr::from_str("https://www.acme.com/"))),
-                subject: Some(not_err!(FromStr::from_str("John Doe"))),
-                audience: Some(SingleOrMultiple::Single(not_err!(FromStr::from_str(
-                    "https://acme-customer.com/"
-                )))),
+                issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
+                subject: Some(FromStr::from_str("John Doe").unwrap()),
+                audience: Some(SingleOrMultiple::Single(
+                    FromStr::from_str("https://acme-customer.com/").unwrap(),
+                )),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },
@@ -400,36 +401,39 @@ mod tests {
             },
         };
 
-        let expected_jwt = not_err!(SignedData::sign(
-            not_err!(Signable::new(
+        let expected_jwt = SignedData::sign(
+            Signable::new(
                 From::from(RegisteredHeader {
-                    algorithm: SignatureAlgorithm::HS256,
+                    algorithm: sign::Algorithm::HS256,
                     ..Default::default()
                 }),
                 serde_json::to_vec(&expected_claims).unwrap(),
-            )),
-            &Secret::Bytes("secret".to_string().into_bytes())
-        ));
+            )
+            .unwrap(),
+            &Secret::Bytes("secret".to_string().into_bytes()),
+        )
+        .unwrap();
         let token = expected_jwt.serialize_flattened();
         assert_eq!(
-            not_err!(serde_json::to_value(HS256_PAYLOAD)),
-            not_err!(serde_json::to_value(&token))
+            serde_json::to_value(HS256_PAYLOAD).unwrap(),
+            serde_json::to_value(&token).unwrap()
         );
 
-        let biscuit = not_err!(SignedData::verify_flattened(
+        let biscuit = SignedData::verify_flattened(
             token.as_bytes(),
             &Secret::Bytes("secret".to_string().into_bytes()),
-            SignatureAlgorithm::HS256
-        ));
+            sign::Algorithm::HS256,
+        )
+        .unwrap();
         assert_eq!(
             &expected_claims,
-            &not_err!(biscuit.data().deserialize_json_payload())
+            &biscuit.data().deserialize_json_payload().unwrap()
         );
     }
 
     #[test]
     fn flattened_jws_round_trip_rs256() {
-        let expected_value = not_err!(serde_json::to_value(
+        let expected_value = serde_json::to_value(
             "{\"protected\":\"eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9\",\
             \"payload\":\"eyJpc3MiOiJodHRwczovL3d3dy5hY21lLmNvbS8iLCJ\
             zdWIiOiJKb2huIERvZSIsImF1ZCI6Imh0dHBzOi8vYWNtZS1jdXN0b21lci\
@@ -441,16 +445,17 @@ mod tests {
             WUtRPpjHm_IqyxV8NkHNyN0p5CqeuRC8sZkOSFkm9b0WnWYRVls1QOjBnN9\
             w9zW9wg9DGwj10pqg8hQ5sy-C3J-9q1zJgGDXInkhPLjitO9wzWg4yfVt-C\
             JNiHsJT7RY_EN2VmbG8UOjHp8xUPpfqUKyoQttKaQkJHdjP_b47LO4ZKI4U\
-            ivlA\"}"
-        ));
+            ivlA\"}",
+        )
+        .unwrap();
 
         let expected_claims = ClaimsSet::<PrivateClaims> {
             registered: RegisteredClaims {
-                issuer: Some(not_err!(FromStr::from_str("https://www.acme.com/"))),
-                subject: Some(not_err!(FromStr::from_str("John Doe"))),
-                audience: Some(SingleOrMultiple::Single(not_err!(FromStr::from_str(
-                    "https://acme-customer.com/"
-                )))),
+                issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
+                subject: Some(FromStr::from_str("John Doe").unwrap()),
+                audience: Some(SingleOrMultiple::Single(
+                    FromStr::from_str("https://acme-customer.com/").unwrap(),
+                )),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },
@@ -462,28 +467,28 @@ mod tests {
         let private_key =
             Secret::rsa_keypair_from_file("test/fixtures/rsa_private_key.der").unwrap();
 
-        let expected_jwt = not_err!(SignedData::sign(
-            not_err!(Signable::new(
+        let expected_jwt = SignedData::sign(
+            Signable::new(
                 From::from(RegisteredHeader {
-                    algorithm: SignatureAlgorithm::RS256,
+                    algorithm: sign::Algorithm::RS256,
                     ..Default::default()
                 }),
                 serde_json::to_vec(&expected_claims).unwrap(),
-            )),
+            )
+            .unwrap(),
             &private_key,
-        ));
+        )
+        .unwrap();
         let token = expected_jwt.serialize_flattened();
-        assert_eq!(expected_value, not_err!(serde_json::to_value(&token)));
+        assert_eq!(expected_value, serde_json::to_value(&token).unwrap());
 
         let public_key = Secret::public_key_from_file("test/fixtures/rsa_public_key.der").unwrap();
-        let biscuit = not_err!(SignedData::verify_flattened(
-            token.as_bytes(),
-            &public_key,
-            SignatureAlgorithm::RS256,
-        ));
+        let biscuit =
+            SignedData::verify_flattened(token.as_bytes(), &public_key, sign::Algorithm::RS256)
+                .unwrap();
         assert_eq!(
             expected_claims,
-            not_err!(biscuit.data().deserialize_json_payload())
+            biscuit.data().deserialize_json_payload().unwrap()
         );
     }
 
@@ -502,12 +507,10 @@ mod tests {
             \"signature\":\"do_XppIOFthPWlTXL95CIBfgRdyAxbcIsUfM0YxMjCjqvp4ehHFA3I-JasABKzC8CAy4ndhCHsZdpAtKkqZMEA\"}";
         let signing_secret = Secret::PublicKey(hex::decode(public_key).unwrap());
 
-        let token = not_err!(SignedData::verify_flattened(
-            jwt.as_bytes(),
-            &signing_secret,
-            SignatureAlgorithm::ES256
-        ));
-        let jwt_val: super::FlattenedRaw = not_err!(serde_json::from_str(jwt));
+        let token =
+            SignedData::verify_flattened(jwt.as_bytes(), &signing_secret, sign::Algorithm::ES256)
+                .unwrap();
+        let jwt_val: super::FlattenedRaw = serde_json::from_str(jwt).unwrap();
         assert_eq!(jwt_val.payload.as_slice(), token.data().payload());
         assert_eq!(
             jwt_val.protected_header.as_slice(),
@@ -525,11 +528,11 @@ mod tests {
 
         let expected_claims = ClaimsSet::<PrivateClaims> {
             registered: RegisteredClaims {
-                issuer: Some(not_err!(FromStr::from_str("https://www.acme.com/"))),
-                subject: Some(not_err!(FromStr::from_str("John Doe"))),
-                audience: Some(SingleOrMultiple::Single(not_err!(FromStr::from_str(
-                    "https://acme-customer.com/"
-                )))),
+                issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
+                subject: Some(FromStr::from_str("John Doe").unwrap()),
+                audience: Some(SingleOrMultiple::Single(
+                    FromStr::from_str("https://acme-customer.com/").unwrap(),
+                )),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },
@@ -546,24 +549,28 @@ mod tests {
             },
         };
 
-        let expected_jwt = not_err!(SignedData::sign(
-            not_err!(Signable::new(
+        let expected_jwt = SignedData::sign(
+            Signable::new(
                 header.clone(),
                 serde_json::to_vec(&expected_claims).unwrap(),
-            )),
-            &Secret::Bytes("secret".to_string().into_bytes())
-        ));
+            )
+            .unwrap(),
+            &Secret::Bytes("secret".to_string().into_bytes()),
+        )
+        .unwrap();
         let token = expected_jwt.serialize_flattened();
-        let biscuit = not_err!(SignedData::verify_flattened(
+        let biscuit = SignedData::verify_flattened(
             token.as_bytes(),
             &Secret::Bytes("secret".to_string().into_bytes()),
-            SignatureAlgorithm::HS256,
-        ));
+            sign::Algorithm::HS256,
+        )
+        .unwrap();
         assert_eq!(
             &header,
-            &not_err!(biscuit
+            &biscuit
                 .data()
-                .deserialize_protected_header::<CustomHeader>())
+                .deserialize_protected_header::<CustomHeader>()
+                .unwrap()
         );
     }
 
@@ -576,7 +583,7 @@ mod tests {
              \"signature\":\"pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI\"}"
                 .as_bytes(),
             &Secret::Bytes("secret".to_string().into_bytes()),
-            SignatureAlgorithm::HS256,
+            sign::Algorithm::HS256,
         );
         let _ = claims.unwrap();
     }
@@ -591,7 +598,7 @@ mod tests {
              \"signature\":\"pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI\"}"
                 .as_bytes(),
             &public_key,
-            SignatureAlgorithm::RS256,
+            sign::Algorithm::RS256,
         );
         let _ = claims.unwrap();
     }
@@ -605,7 +612,7 @@ mod tests {
              \"signature\":\"pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI\"}"
                 .as_bytes(),
             &Secret::Bytes("secret".to_string().into_bytes()),
-            SignatureAlgorithm::HS256,
+            sign::Algorithm::HS256,
         );
         let _ = claims.unwrap();
     }
@@ -616,7 +623,7 @@ mod tests {
         let _ = SignedData::verify_flattened(
             br#"{"signatures": [], "protected": "", "payload": "", "signature: ""}"#,
             &Secret::None,
-            SignatureAlgorithm::None,
+            sign::Algorithm::None,
         )
         .unwrap();
     }
@@ -627,7 +634,7 @@ mod tests {
         let _ = SignedData::verify_flattened(
             br#"{"header": "", "protected": "", "payload": "", "signature: ""}"#,
             &Secret::None,
-            SignatureAlgorithm::None,
+            sign::Algorithm::None,
         )
         .unwrap();
     }

@@ -113,19 +113,12 @@ impl From<AES_GCM> for super::Algorithm {
 
 #[cfg(test)]
 mod tests {
-    use rand::RngCore;
-
-    pub fn random_vec(len: usize) -> Vec<u8> {
-        let mut nonce = vec![0; len];
-        rand::thread_rng().fill_bytes(&mut nonce);
-        nonce
-    }
+    use super::*;
+    use crate::test::random_vec;
 
     pub fn random_aes_gcm_nonce() -> Vec<u8> {
         random_vec(12)
     }
-
-    use super::*;
 
     #[test]
     fn aes128gcmkw_key_encryption_round_trip() {

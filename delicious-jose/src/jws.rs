@@ -7,7 +7,7 @@ pub use flattened::{Signable, SignedData};
 use serde::de::DeserializeOwned;
 
 use crate::errors::Error;
-use crate::jwa::SignatureAlgorithm;
+use crate::jwa::sign;
 use crate::jwk;
 use crate::CompactPart;
 
@@ -71,7 +71,7 @@ pub enum Secret {
     /// ```
     /// use biscuit::jws::Secret;
     ///
-    /// let secret = Secret::ecdsa_keypair_from_file(biscuit::jwa::SignatureAlgorithm::ES256, "test/fixtures/ecdsa_private_key.p8");
+    /// let secret = Secret::ecdsa_keypair_from_file(biscuit::jwa::sign::Algorithm::ES256, "test/fixtures/ecdsa_private_key.p8");
     /// ```
     EcdsaKeyPair(Arc<signature::EcdsaKeyPair>),
     /// Bytes of a DER encoded RSA Public Key
@@ -190,14 +190,11 @@ impl Secret {
     }
 
     /// Convenience function to get the ECDSA Keypair from a PKCS8-DER encoded EC private key.
-    pub fn ecdsa_keypair_from_file(
-        algorithm: SignatureAlgorithm,
-        path: &str,
-    ) -> Result<Self, Error> {
+    pub fn ecdsa_keypair_from_file(algorithm: sign::Algorithm, path: &str) -> Result<Self, Error> {
         let der = Self::read_bytes(path)?;
         let ring_algorithm = match algorithm {
-            SignatureAlgorithm::ES256 => &signature::ECDSA_P256_SHA256_FIXED_SIGNING,
-            SignatureAlgorithm::ES384 => &signature::ECDSA_P384_SHA384_FIXED_SIGNING,
+            sign::Algorithm::ES256 => &signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+            sign::Algorithm::ES384 => &signature::ECDSA_P384_SHA384_FIXED_SIGNING,
             _ => return Err(Error::UnsupportedOperation),
         };
         let key_pair = signature::EcdsaKeyPair::from_pkcs8(ring_algorithm, der.as_slice())?;
@@ -269,7 +266,7 @@ pub struct RegisteredHeader {
     /// Serialized to `alg`.
     /// Defined in [RFC7515#4.1.1](https://tools.ietf.org/html/rfc7515#section-4.1.1).
     #[serde(rename = "alg")]
-    pub algorithm: SignatureAlgorithm,
+    pub algorithm: sign::Algorithm,
 
     /// Media type of the complete JWS. Serialized to `typ`.
     /// Defined in [RFC7519#5.1](https://tools.ietf.org/html/rfc7519#section-5.1) and additionally
@@ -340,7 +337,7 @@ pub struct RegisteredHeader {
 impl Default for RegisteredHeader {
     fn default() -> RegisteredHeader {
         RegisteredHeader {
-            algorithm: SignatureAlgorithm::default(),
+            algorithm: sign::Algorithm::default(),
             media_type: Some("JWT".to_string()),
             content_type: None,
             web_key_url: None,
@@ -363,10 +360,10 @@ mod tests {
         let expected = RegisteredHeader::default();
         let expected_json = r#"{"alg":"HS256","typ":"JWT"}"#;
 
-        let encoded = not_err!(serde_json::to_string(&expected));
+        let encoded = serde_json::to_string(&expected).unwrap();
         assert_eq!(expected_json, encoded);
 
-        let decoded: RegisteredHeader = not_err!(serde_json::from_str(&encoded));
+        let decoded: RegisteredHeader = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, expected);
     }
 
@@ -379,10 +376,10 @@ mod tests {
 
         let expected_json = r#"{"alg":"HS256","typ":"JWT","kid":"kid"}"#;
 
-        let encoded = not_err!(serde_json::to_string(&expected));
+        let encoded = serde_json::to_string(&expected).unwrap();
         assert_eq!(expected_json, encoded);
 
-        let decoded: RegisteredHeader = not_err!(serde_json::from_str(&encoded));
+        let decoded: RegisteredHeader = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, expected);
     }
 }

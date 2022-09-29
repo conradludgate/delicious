@@ -116,10 +116,10 @@ mod tests {
         };
         let expected_json = r#"{"bytes":"aGVsbG8gd29ybGQ"}"#;
 
-        let actual_json = not_err!(serde_json::to_string(&test_value));
+        let actual_json = serde_json::to_string(&test_value).unwrap();
         assert_eq!(expected_json, actual_json);
 
-        let deserialized_value: TestStruct = not_err!(serde_json::from_str(&actual_json));
+        let deserialized_value: TestStruct = serde_json::from_str(&actual_json).unwrap();
         assert_eq!(test_value, deserialized_value);
     }
 
@@ -128,10 +128,10 @@ mod tests {
         let test_value = TestStruct { bytes: None };
         let expected_json = r#"{"bytes":null}"#;
 
-        let actual_json = not_err!(serde_json::to_string(&test_value));
+        let actual_json = serde_json::to_string(&test_value).unwrap();
         assert_eq!(expected_json, actual_json);
 
-        let deserialized_value: TestStruct = not_err!(serde_json::from_str(&actual_json));
+        let deserialized_value: TestStruct = serde_json::from_str(&actual_json).unwrap();
         assert_eq!(test_value, deserialized_value);
     }
 }

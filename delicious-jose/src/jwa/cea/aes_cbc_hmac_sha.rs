@@ -4,12 +4,8 @@ use aes::cipher::{BlockDecryptMut, BlockEncryptMut};
 use cipher::block_padding::Pkcs7;
 use hmac::Hmac;
 
-use crate::{
-    errors::Error,
-    jwa::{ContentEncryptionAlgorithm, EncryptionResult, OctetKey},
-};
-
-use super::CEA;
+use super::{Algorithm, EncryptionResult, CEA};
+use crate::{errors::Error, jwa::OctetKey};
 
 /// [Content Encryption with AES_CBC_HMAC_SHA2](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2)
 ///
@@ -36,7 +32,7 @@ pub type A256CBC_HS512 = AesCbcHmacSha2<aes::Aes256, sha2::Sha512>;
 macro_rules! aes_cbc {
     ($id:ident, $sha:ty, $aes:ty, $key_len:expr) => {
         impl CEA for $id {
-            const ENC: ContentEncryptionAlgorithm = ContentEncryptionAlgorithm::$id;
+            const ENC: Algorithm = Algorithm::$id;
             type Cek = OctetKey;
             const IV: usize = 128 / 8;
 

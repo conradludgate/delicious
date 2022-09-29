@@ -7,7 +7,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::errors::{Error, ValidationError};
-use crate::jwa::{Algorithm, SignatureAlgorithm};
+use crate::jwa::{sign, Algorithm};
 use crate::jwk::{AlgorithmParameters, JWKSet};
 use crate::{CompactPart, Json};
 
@@ -151,7 +151,7 @@ where
     pub fn decode_json(
         encoded: Encoded<Json<T>, H>,
         secret: &Secret,
-        algorithm: SignatureAlgorithm,
+        algorithm: sign::Algorithm,
     ) -> Result<Self, Error> {
         let Decoded { header, payload } = Decoded::decode(encoded, secret, algorithm)?;
         Ok(Self {
@@ -195,7 +195,7 @@ where
     pub fn decode(
         encoded: Encoded<T, H>,
         secret: &Secret,
-        algorithm: SignatureAlgorithm,
+        algorithm: sign::Algorithm,
     ) -> Result<Self, Error> {
         let Encoded {
             header,
@@ -227,7 +227,7 @@ where
     pub fn decode_with_jwks<J>(
         encoded: Encoded<T, H>,
         jwks: &JWKSet<J>,
-        expected_algorithm: Option<SignatureAlgorithm>,
+        expected_algorithm: Option<sign::Algorithm>,
     ) -> Result<Self, Error> {
         let Encoded {
             header,
@@ -312,7 +312,7 @@ mod tests {
 
     use serde::{Deserialize, Serialize};
 
-    use super::{Decoded, Encoded, Header, Secret, SignatureAlgorithm};
+    use super::{sign, Decoded, Encoded, Header, Secret};
     use crate::errors::Error;
     use crate::jwk::JWKSet;
     use crate::jws::RegisteredHeader;
@@ -351,11 +351,11 @@ mod tests {
 
         let expected_claims = ClaimsSet::<PrivateClaims> {
             registered: RegisteredClaims {
-                issuer: Some(not_err!(FromStr::from_str("https://www.acme.com/"))),
-                subject: Some(not_err!(FromStr::from_str("John Doe"))),
-                audience: Some(SingleOrMultiple::Single(not_err!(FromStr::from_str(
-                    "https://acme-customer.com/"
-                )))),
+                issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
+                subject: Some(FromStr::from_str("John Doe").unwrap()),
+                audience: Some(SingleOrMultiple::Single(
+                    FromStr::from_str("https://acme-customer.com/").unwrap(),
+                )),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },
@@ -367,19 +367,16 @@ mod tests {
 
         let expected_jwt = Decoded::new(
             From::from(RegisteredHeader {
-                algorithm: SignatureAlgorithm::None,
+                algorithm: sign::Algorithm::None,
                 ..Default::default()
             }),
             expected_claims.clone(),
         );
-        let token = not_err!(expected_jwt.encode(&Secret::None));
+        let token = expected_jwt.encode(&Secret::None).unwrap();
         assert_eq!(expected_token, token.to_string());
 
-        let biscuit: Decoded<ClaimsSet<PrivateClaims>, ()> = not_err!(Decoded::decode(
-            token,
-            &Secret::None,
-            SignatureAlgorithm::None
-        ));
+        let biscuit: Decoded<ClaimsSet<PrivateClaims>, ()> =
+            Decoded::decode(token, &Secret::None, sign::Algorithm::None).unwrap();
         assert_eq!(expected_claims, biscuit.payload);
     }
 
@@ -387,11 +384,11 @@ mod tests {
     fn compact_jws_round_trip_hs256() {
         let expected_claims = ClaimsSet::<PrivateClaims> {
             registered: RegisteredClaims {
-                issuer: Some(not_err!(FromStr::from_str("https://www.acme.com/"))),
-                subject: Some(not_err!(FromStr::from_str("John Doe"))),
-                audience: Some(SingleOrMultiple::Single(not_err!(FromStr::from_str(
-                    "https://acme-customer.com/"
-                )))),
+                issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
+                subject: Some(FromStr::from_str("John Doe").unwrap()),
+                audience: Some(SingleOrMultiple::Single(
+                    FromStr::from_str("https://acme-customer.com/").unwrap(),
+                )),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },
@@ -403,20 +400,22 @@ mod tests {
 
         let expected_jwt = Decoded::new(
             From::from(RegisteredHeader {
-                algorithm: SignatureAlgorithm::HS256,
+                algorithm: sign::Algorithm::HS256,
                 ..Default::default()
             }),
             expected_claims.clone(),
         );
-        let token =
-            not_err!(expected_jwt.encode(&Secret::Bytes("secret".to_string().into_bytes())));
+        let token = expected_jwt
+            .encode(&Secret::Bytes("secret".to_string().into_bytes()))
+            .unwrap();
         assert_eq!(HS256_PAYLOAD, token.to_string());
 
-        let biscuit: Decoded<ClaimsSet<PrivateClaims>, ()> = not_err!(Decoded::decode(
+        let biscuit: Decoded<ClaimsSet<PrivateClaims>, ()> = Decoded::decode(
             token,
             &Secret::Bytes("secret".to_string().into_bytes()),
-            SignatureAlgorithm::HS256
-        ));
+            sign::Algorithm::HS256,
+        )
+        .unwrap();
         assert_eq!(expected_claims, biscuit.payload);
     }
 
@@ -433,11 +432,11 @@ mod tests {
 
         let expected_claims = ClaimsSet::<PrivateClaims> {
             registered: RegisteredClaims {
-                issuer: Some(not_err!(FromStr::from_str("https://www.acme.com/"))),
-                subject: Some(not_err!(FromStr::from_str("John Doe"))),
-                audience: Some(SingleOrMultiple::Single(not_err!(FromStr::from_str(
-                    "https://acme-customer.com/"
-                )))),
+                issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
+                subject: Some(FromStr::from_str("John Doe").unwrap()),
+                audience: Some(SingleOrMultiple::Single(
+                    FromStr::from_str("https://acme-customer.com/").unwrap(),
+                )),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },
@@ -451,20 +450,17 @@ mod tests {
 
         let expected_jwt = Decoded::new(
             From::from(RegisteredHeader {
-                algorithm: SignatureAlgorithm::RS256,
+                algorithm: sign::Algorithm::RS256,
                 ..Default::default()
             }),
             expected_claims.clone(),
         );
-        let token = not_err!(expected_jwt.encode(&private_key));
+        let token = expected_jwt.encode(&private_key).unwrap();
         assert_eq!(expected_token, token.to_string());
 
         let public_key = Secret::public_key_from_file("test/fixtures/rsa_public_key.der").unwrap();
-        let biscuit: Decoded<_, ()> = not_err!(Decoded::decode(
-            token,
-            &public_key,
-            SignatureAlgorithm::RS256
-        ));
+        let biscuit: Decoded<_, ()> =
+            Decoded::decode(token, &public_key, sign::Algorithm::RS256).unwrap();
         assert_eq!(expected_claims, biscuit.payload);
     }
 
@@ -484,11 +480,12 @@ mod tests {
         let signing_secret = Secret::PublicKey(hex::decode(public_key.as_bytes()).unwrap());
 
         let token = Encoded::from_str(jwt).unwrap();
-        let _ = not_err!(Decoded::<ClaimsSet<serde_json::Value>, ()>::decode(
+        let _ = Decoded::<ClaimsSet<serde_json::Value>, ()>::decode(
             token,
             &signing_secret,
-            SignatureAlgorithm::ES256
-        ));
+            sign::Algorithm::ES256,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -500,11 +497,11 @@ mod tests {
 
         let expected_claims = ClaimsSet::<PrivateClaims> {
             registered: RegisteredClaims {
-                issuer: Some(not_err!(FromStr::from_str("https://www.acme.com/"))),
-                subject: Some(not_err!(FromStr::from_str("John Doe"))),
-                audience: Some(SingleOrMultiple::Single(not_err!(FromStr::from_str(
-                    "https://acme-customer.com/"
-                )))),
+                issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
+                subject: Some(FromStr::from_str("John Doe").unwrap()),
+                audience: Some(SingleOrMultiple::Single(
+                    FromStr::from_str("https://acme-customer.com/").unwrap(),
+                )),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },
@@ -522,13 +519,15 @@ mod tests {
         };
 
         let expected_jwt = Decoded::new(header.clone(), expected_claims);
-        let token =
-            not_err!(expected_jwt.encode(&Secret::Bytes("secret".to_string().into_bytes())));
-        let biscuit: Decoded<ClaimsSet<PrivateClaims>, CustomHeader> = not_err!(Decoded::decode(
+        let token = expected_jwt
+            .encode(&Secret::Bytes("secret".to_string().into_bytes()))
+            .unwrap();
+        let biscuit: Decoded<ClaimsSet<PrivateClaims>, CustomHeader> = Decoded::decode(
             token,
             &Secret::Bytes("secret".to_string().into_bytes()),
-            SignatureAlgorithm::HS256
-        ));
+            sign::Algorithm::HS256,
+        )
+        .unwrap();
         assert_eq!(header, biscuit.header);
     }
 
@@ -539,7 +538,7 @@ mod tests {
         let claims = Decoded::<PrivateClaims, ()>::decode(
             token,
             &Secret::Bytes("secret".to_string().into_bytes()),
-            SignatureAlgorithm::HS256,
+            sign::Algorithm::HS256,
         );
         let _ = claims.unwrap();
     }
@@ -556,7 +555,7 @@ mod tests {
         let claims = Decoded::<PrivateClaims, ()>::decode(
             token,
             &Secret::Bytes("secret".to_string().into_bytes()),
-            SignatureAlgorithm::HS256,
+            sign::Algorithm::HS256,
         );
         let _ = claims.unwrap();
     }
@@ -572,7 +571,7 @@ mod tests {
         .unwrap();
         let public_key = Secret::public_key_from_file("test/fixtures/rsa_public_key.der").unwrap();
         let claims =
-            Decoded::<PrivateClaims, ()>::decode(token, &public_key, SignatureAlgorithm::RS256);
+            Decoded::<PrivateClaims, ()>::decode(token, &public_key, sign::Algorithm::RS256);
         let _ = claims.unwrap();
     }
 
@@ -588,7 +587,7 @@ mod tests {
         let claims = Decoded::<PrivateClaims, ()>::decode(
             token,
             &Secret::Bytes("secret".to_string().into_bytes()),
-            SignatureAlgorithm::HS256,
+            sign::Algorithm::HS256,
         );
         let _ = claims.unwrap();
     }
@@ -607,21 +606,23 @@ mod tests {
 
         let expected_jwt = Decoded::new(
             From::from(RegisteredHeader {
-                algorithm: SignatureAlgorithm::HS256,
+                algorithm: sign::Algorithm::HS256,
                 content_type: Some("Random bytes".to_string()),
                 ..Default::default()
             }),
             payload.clone(),
         );
-        let token =
-            not_err!(expected_jwt.encode(&Secret::Bytes("secret".to_string().into_bytes())));
+        let token = expected_jwt
+            .encode(&Secret::Bytes("secret".to_string().into_bytes()))
+            .unwrap();
         assert_eq!(expected_token, token.to_string());
 
-        let biscuit: Decoded<Vec<u8>, ()> = not_err!(Decoded::decode(
+        let biscuit: Decoded<Vec<u8>, ()> = Decoded::decode(
             token,
             &Secret::Bytes("secret".to_string().into_bytes()),
-            SignatureAlgorithm::HS256
-        ));
+            sign::Algorithm::HS256,
+        )
+        .unwrap();
         assert_eq!(payload, biscuit.payload);
     }
 
@@ -681,7 +682,7 @@ mod tests {
         let _ = Decoded::<PrivateClaims, ()>::decode_with_jwks(
             token,
             &jwks,
-            Some(SignatureAlgorithm::HS256),
+            Some(sign::Algorithm::HS256),
         )
         .expect("to succeed");
     }
@@ -715,7 +716,7 @@ mod tests {
         let _ = Decoded::<PrivateClaims, ()>::decode_with_jwks(
             token,
             &jwks,
-            Some(SignatureAlgorithm::RS256),
+            Some(sign::Algorithm::RS256),
         )
         .unwrap();
     }
@@ -747,7 +748,7 @@ mod tests {
         let _ = Decoded::<PrivateClaims, ()>::decode_with_jwks(
             token,
             &jwks,
-            Some(SignatureAlgorithm::HS256),
+            Some(sign::Algorithm::HS256),
         )
         .unwrap();
     }
@@ -780,7 +781,7 @@ mod tests {
         let _ = Decoded::<PrivateClaims, ()>::decode_with_jwks(
             token,
             &jwks,
-            Some(SignatureAlgorithm::RS256),
+            Some(sign::Algorithm::RS256),
         )
         .unwrap();
     }

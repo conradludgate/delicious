@@ -1207,7 +1207,7 @@ mod tests {
                 JWK {
                     specified: Specified {
                         common: CommonParameters {
-                            algorithm: Some(Algorithm::Signature(jwa::SignatureAlgorithm::RS256)),
+                            algorithm: Some(Algorithm::Signature(jwa::sign::Algorithm::RS256)),
                             key_id: Some("2011-04-29".to_string()),
                             ..Default::default()
                         },
@@ -1278,7 +1278,7 @@ mod tests {
                 JWK {
                     specified: Specified {
                         common: CommonParameters {
-                            algorithm: Some(Algorithm::Signature(jwa::SignatureAlgorithm::RS256)),
+                            algorithm: Some(Algorithm::Signature(jwa::sign::Algorithm::RS256)),
                             key_id: Some("2011-04-29".to_string()),
                             ..Default::default()
                         },
