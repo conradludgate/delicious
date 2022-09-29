@@ -1,11 +1,9 @@
 use std::marker::PhantomData;
 
-use crate::{errors::Error, jwa::{EncryptionResult, OctetKey}};
-use ::aead::{
-    generic_array::{ArrayLength, GenericArray},
-    AeadInPlace, KeyInit,
+use crate::{
+    errors::Error,
+    jwa::{EncryptionResult, OctetKey},
 };
-use ring::aead;
 
 use super::KMA;
 
@@ -38,6 +36,8 @@ pub struct AES_GCM_Header {
     tag: Vec<u8>,
 }
 
+use crate::jwa::cea::AesGcm;
+
 macro_rules! aes_gcm {
     ($aes:ty, $name:literal) => {
         impl KMA for AesGcmKw<$aes> {
@@ -52,18 +52,12 @@ macro_rules! aes_gcm {
                 key: &Self::Key,
                 settings: Self::WrapSettings,
             ) -> Result<(Vec<u8>, Self::AlgorithmHeader), Error> {
-                let cipher = <$aes>::new_from_slice(&key.0)?;
-                let nonce: &aes_gcm::Nonce<_> = from_slice(&settings)?;
-                let mut in_out: Vec<u8> = cek.0;
-                let tag = cipher
-                    .encrypt_in_place_detached(nonce, &[], &mut in_out)
-                    .map_err(|_| Error::UnspecifiedCryptographicError)?;
-
+                let res = AesGcm::<$aes>::encrypt_inner(&key.0, cek.0, settings, Vec::new())?;
                 let header = AES_GCM_Header {
-                    nonce: settings,
-                    tag: tag.to_vec(),
+                    nonce: res.nonce,
+                    tag: res.tag,
                 };
-                Ok((in_out, header))
+                Ok((res.encrypted, header))
             }
 
             fn unwrap(
@@ -71,15 +65,14 @@ macro_rules! aes_gcm {
                 key: &Self::Key,
                 header: Self::AlgorithmHeader,
             ) -> Result<Self::Cek, Error> {
-                let cipher = <$aes>::new_from_slice(&key.0)?;
-                let nonce: &aes_gcm::Nonce<_> = from_slice(&header.nonce)?;
-                let tag: &aes_gcm::Tag = from_slice(&header.tag)?;
-                let mut in_out: Vec<u8> = encrypted_cek.to_vec();
-                cipher
-                    .decrypt_in_place_detached(nonce, &[], &mut in_out, tag)
-                    .map_err(|_| Error::UnspecifiedCryptographicError)?;
-
-                Ok(OctetKey(in_out))
+                let res = AesGcm::<$aes>::decrypt_inner(
+                    &key.0,
+                    encrypted_cek,
+                    &header.nonce,
+                    &header.tag,
+                    &[],
+                )?;
+                Ok(OctetKey(res))
             }
         }
     };
@@ -88,13 +81,13 @@ macro_rules! aes_gcm {
 aes_gcm!(aes_gcm::Aes128Gcm, "A128GCMKW");
 aes_gcm!(aes_gcm::Aes256Gcm, "A256GCMKW");
 
-fn from_slice<Size: ArrayLength<u8>>(x: &[u8]) -> Result<&GenericArray<u8, Size>, Error> {
-    if x.len() != Size::to_usize() {
-        Err(Error::UnspecifiedCryptographicError)
-    } else {
-        Ok(GenericArray::from_slice(x))
-    }
-}
+// fn from_slice<Size: ArrayLength<u8>>(x: &[u8]) -> Result<&GenericArray<u8, Size>, Error> {
+//     if x.len() != Size::to_usize() {
+//         Err(Error::UnspecifiedCryptographicError)
+//     } else {
+//         Ok(GenericArray::from_slice(x))
+//     }
+// }
 
 impl From<AES_GCM> for super::Algorithm {
     fn from(a: AES_GCM) -> Self {
@@ -149,53 +142,6 @@ impl AES_GCM {
     }
 }
 
-/// Encrypt a payload with AES GCM
-pub(crate) fn aes_gcm_encrypt(
-    algorithm: &'static aead::Algorithm,
-    payload: &[u8],
-    nonce: &[u8],
-    aad: &[u8],
-    key: &[u8],
-) -> Result<EncryptionResult, Error> {
-    let key = aead::UnboundKey::new(algorithm, key)?;
-    let sealing_key = aead::LessSafeKey::new(key);
-
-    let mut in_out: Vec<u8> = payload.to_vec();
-    let tag = sealing_key.seal_in_place_separate_tag(
-        aead::Nonce::try_assume_unique_for_key(nonce)?,
-        aead::Aad::from(aad),
-        &mut in_out,
-    )?;
-
-    Ok(EncryptionResult {
-        nonce: nonce.to_vec(),
-        encrypted: in_out,
-        tag: tag.as_ref().to_vec(),
-        additional_data: aad.to_vec(),
-    })
-}
-
-/// Decrypts a payload with AES GCM
-pub(crate) fn aes_gcm_decrypt(
-    algorithm: &'static aead::Algorithm,
-    encrypted: &EncryptionResult,
-    key: &[u8],
-) -> Result<Vec<u8>, Error> {
-    let key = aead::UnboundKey::new(algorithm, key)?;
-    let opening_key = aead::LessSafeKey::new(key);
-
-    let mut in_out = encrypted.encrypted.clone();
-    in_out.append(&mut encrypted.tag.clone());
-
-    let nonce = aead::Nonce::try_assume_unique_for_key(&encrypted.nonce)?;
-    let plaintext = opening_key.open_in_place(
-        nonce,
-        aead::Aad::from(&encrypted.additional_data),
-        &mut in_out,
-    )?;
-    Ok(plaintext.to_vec())
-}
-
 #[cfg(test)]
 mod tests {
     use ring::{
@@ -204,85 +150,12 @@ mod tests {
     };
 
     use crate::{
-        jwa::{kma::Algorithm, random_aes_gcm_nonce, AES_GCM_NONCE_LENGTH},
+        jwa::{kma::Algorithm, random_aes_gcm_nonce},
         jwe::CekAlgorithmHeader,
         jwk,
     };
 
     use super::*;
-    #[test]
-    fn aes_gcm_128_encryption_round_trip_fixed_key_nonce() {
-        const PAYLOAD: &str = "这个世界值得我们奋战！";
-        let key: Vec<u8> = vec![0; 128 / 8];
-
-        let encrypted = not_err!(aes_gcm_encrypt(
-            &aead::AES_128_GCM,
-            PAYLOAD.as_bytes(),
-            &[0; AES_GCM_NONCE_LENGTH],
-            &[],
-            &key,
-        ));
-        let decrypted = not_err!(aes_gcm_decrypt(&aead::AES_128_GCM, &encrypted, &key));
-
-        let payload = not_err!(String::from_utf8(decrypted));
-        assert_eq!(payload, PAYLOAD);
-    }
-
-    #[test]
-    fn aes_gcm_128_encryption_round_trip() {
-        const PAYLOAD: &str = "这个世界值得我们奋战！";
-        let mut key: Vec<u8> = vec![0; 128 / 8];
-        not_err!(SystemRandom::new().fill(&mut key));
-
-        let encrypted = not_err!(aes_gcm_encrypt(
-            &aead::AES_128_GCM,
-            PAYLOAD.as_bytes(),
-            &random_aes_gcm_nonce().unwrap(),
-            &[],
-            &key,
-        ));
-        let decrypted = not_err!(aes_gcm_decrypt(&aead::AES_128_GCM, &encrypted, &key));
-
-        let payload = not_err!(String::from_utf8(decrypted));
-        assert_eq!(payload, PAYLOAD);
-    }
-
-    #[test]
-    fn aes_gcm_256_encryption_round_trip() {
-        const PAYLOAD: &str = "这个世界值得我们奋战！";
-        let mut key: Vec<u8> = vec![0; 256 / 8];
-        not_err!(SystemRandom::new().fill(&mut key));
-
-        let encrypted = not_err!(aes_gcm_encrypt(
-            &aead::AES_256_GCM,
-            PAYLOAD.as_bytes(),
-            &random_aes_gcm_nonce().unwrap(),
-            &[],
-            &key,
-        ));
-        let decrypted = not_err!(aes_gcm_decrypt(&aead::AES_256_GCM, &encrypted, &key));
-
-        let payload = not_err!(String::from_utf8(decrypted));
-        assert_eq!(payload, PAYLOAD);
-    }
-
-    #[test]
-    fn aes_gcm_256_encryption_round_trip_fixed_key_nonce() {
-        const PAYLOAD: &str = "这个世界值得我们奋战！";
-        let key: Vec<u8> = vec![0; 256 / 8];
-
-        let encrypted = not_err!(aes_gcm_encrypt(
-            &aead::AES_256_GCM,
-            PAYLOAD.as_bytes(),
-            &[0; AES_GCM_NONCE_LENGTH],
-            &[],
-            &key,
-        ));
-        let decrypted = not_err!(aes_gcm_decrypt(&aead::AES_256_GCM, &encrypted, &key));
-
-        let payload = not_err!(String::from_utf8(decrypted));
-        assert_eq!(payload, PAYLOAD);
-    }
 
     fn random_key(length: usize) -> Vec<u8> {
         let mut key: Vec<u8> = vec![0; length];

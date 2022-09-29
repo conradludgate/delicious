@@ -8,18 +8,17 @@ use once_cell::sync::Lazy;
 use ring::constant_time::verify_slices_are_equal;
 use ring::rand::SystemRandom;
 use ring::signature::KeyPair;
-use ring::{aead, hmac, rand, signature};
+use ring::{hmac, rand, signature};
 use serde::{Deserialize, Serialize};
 
 use crate::errors::Error;
-use crate::jwa::kma::aes_gcm::{aes_gcm_decrypt, aes_gcm_encrypt};
 use crate::jwk;
 use crate::jws::Secret;
 
 use ring::rand::SecureRandom;
 
-pub mod kma;
 pub mod cea;
+pub mod kma;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OctetKey(Vec<u8>);
@@ -489,34 +488,37 @@ impl ContentEncryptionAlgorithm {
         options: &EncryptionOptions,
     ) -> Result<EncryptionResult, Error> {
         use self::ContentEncryptionAlgorithm::{A128GCM, A256GCM};
+        use cea::CEA;
 
-        let algorithm = match self {
-            A128GCM => &aead::AES_128_GCM,
-            A256GCM => &aead::AES_256_GCM,
-            _ => Err(Error::UnsupportedOperation)?,
+        let iv = match *options {
+            EncryptionOptions::AES_GCM { ref nonce } => nonce.to_vec(),
+            ref others => {
+                return Err(unexpected_encryption_options_error!(
+                    AES_GCM_ZEROED_NONCE,
+                    others
+                ))
+            }
         };
+        let key = OctetKey(key.to_vec());
+        let aad = aad.to_vec();
 
-        let nonce = match *options {
-            EncryptionOptions::AES_GCM { ref nonce } => Ok(nonce),
-            ref others => Err(unexpected_encryption_options_error!(
-                AES_GCM_ZEROED_NONCE,
-                others
-            )),
-        }?;
-        // FIXME: Should we check the nonce length here or leave it to ring?
-
-        aes_gcm_encrypt(algorithm, payload, nonce.as_slice(), aad, key)
+        match self {
+            A128GCM => cea::A128GCM::encrypt(&key, payload, iv, aad),
+            A256GCM => cea::A256GCM::encrypt(&key, payload, iv, aad),
+            _ => Err(Error::UnsupportedOperation),
+        }
     }
 
     fn aes_gcm_decrypt(self, encrypted: &EncryptionResult, key: &[u8]) -> Result<Vec<u8>, Error> {
         use self::ContentEncryptionAlgorithm::{A128GCM, A256GCM};
+        use cea::CEA;
 
-        let algorithm = match self {
-            A128GCM => &aead::AES_128_GCM,
-            A256GCM => &aead::AES_256_GCM,
-            _ => Err(Error::UnsupportedOperation)?,
-        };
-        aes_gcm_decrypt(algorithm, encrypted, key)
+        let key = OctetKey(key.to_vec());
+        match self {
+            A128GCM => cea::A128GCM::decrypt(&key, encrypted),
+            A256GCM => cea::A256GCM::decrypt(&key, encrypted),
+            _ => Err(Error::UnsupportedOperation),
+        }
     }
 }
 

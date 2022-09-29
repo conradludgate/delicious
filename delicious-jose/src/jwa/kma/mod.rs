@@ -9,8 +9,10 @@ use super::ContentEncryptionAlgorithm;
 pub(crate) mod aes_gcm;
 mod pbes2_aes_kw;
 
-pub use self::aes_gcm::{AES_GCM, A128GCMKW, A256GCMKW};
-pub use pbes2_aes_kw::{PBES2, PBES2_HS256_A128KW, PBES2_HS384_A192KW, PBES2_HS512_A256KW};
+pub use self::aes_gcm::{AES_GCM_Header, AesGcmKw, A128GCMKW, A256GCMKW, AES_GCM};
+pub use pbes2_aes_kw::{
+    PBES2Alg, PBES2_Header, PBES2, PBES2_HS256_A128KW, PBES2_HS384_A192KW, PBES2_HS512_A256KW,
+};
 
 /// Algorithms for key management as defined in [RFC7518#4](https://tools.ietf.org/html/rfc7518#section-4)
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -234,7 +236,6 @@ pub trait KMA {
         settings: Self::AlgorithmHeader,
     ) -> Result<Self::Cek, Error>;
 }
-
 
 #[cfg(test)]
 mod tests {
