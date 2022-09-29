@@ -11,9 +11,14 @@ pub use aes_cbc_hmac_sha::{AesCbcHmacSha2, A128CBC_HS256, A192CBC_HS384, A256CBC
 /// [Cryptographic Algorithms for Content Encryption](https://datatracker.ietf.org/doc/html/rfc7518#section-5)
 pub trait CEA {
     /// The name specified in the `enc` header.
-    const ENC: &'static str;
+    const ENC: super::ContentEncryptionAlgorithm;
     /// Content Encryption Key
     type Cek;
+    /// Initialization Vector length in bytes
+    const IV: usize;
+
+    /// Generate a random content encryption key
+    fn generate_cek() -> Self::Cek;
 
     /// Encrypts the payload
     fn encrypt(

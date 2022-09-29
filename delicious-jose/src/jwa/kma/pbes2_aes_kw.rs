@@ -3,6 +3,7 @@ use aes::cipher::{Block, BlockDecryptMut, BlockEncryptMut};
 use aes::{Aes128, Aes192, Aes256};
 use digest::core_api::BlockSizeUser;
 use hmac::Hmac;
+use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
 use crate::errors::Error;
@@ -40,14 +41,14 @@ impl PBES2 {
 
         let cek = OctetKey(payload.to_vec());
         let key = OctetKey(key.to_vec());
-        let header = PBES2_Header {
+        let header = Pbes2Header {
             count,
             salt: base64::decode_config(salt, base64::URL_SAFE_NO_PAD)?,
         };
         Ok(match self {
-            HS256_A128KW => PBES2_HS256_A128KW::wrap(cek, &key, header)?.0,
-            HS384_A192KW => PBES2_HS384_A192KW::wrap(cek, &key, header)?.0,
-            HS512_A256KW => PBES2_HS512_A256KW::wrap(cek, &key, header)?.0,
+            HS256_A128KW => PBES2_HS256_A128KW::wrap(&cek, &key, header)?.0,
+            HS384_A192KW => PBES2_HS384_A192KW::wrap(&cek, &key, header)?.0,
+            HS512_A256KW => PBES2_HS512_A256KW::wrap(&cek, &key, header)?.0,
         })
     }
 
@@ -61,7 +62,7 @@ impl PBES2 {
         use PBES2::{HS256_A128KW, HS384_A192KW, HS512_A256KW};
 
         let key = OctetKey(key.to_vec());
-        let header = PBES2_Header {
+        let header = Pbes2Header {
             count,
             salt: base64::decode_config(salt, base64::URL_SAFE_NO_PAD)?,
         };
@@ -159,28 +160,32 @@ fn aes_key_unwrap<T: BlockSizeUser + BlockDecryptMut>(
     Ok(())
 }
 
-#[allow(non_camel_case_types)]
-pub struct PBES2_Header {
+/// Header for PBES2 algorithm.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Pbes2Header {
+    #[serde(rename = "p2c")]
     count: u32,
+    #[serde(rename = "p2s")]
     salt: Vec<u8>,
 }
 
 macro_rules! pbes2 {
-    ($id:ident, $sha:ty, $aes:ty, $name:literal, $key_len:expr) => {
+    ($id:ident, $sha:ty, $aes:ty, $name:ident, $key_len:expr) => {
         impl KMA for $id {
-            const ALG: &'static str = $name;
+            const ALG: super::Algorithm = super::Algorithm::PBES2(PBES2::$name);
             type Key = OctetKey;
             type Cek = OctetKey;
-            type AlgorithmHeader = PBES2_Header;
-            type WrapSettings = PBES2_Header;
+            type Header = Pbes2Header;
+            type WrapSettings = Pbes2Header;
 
             fn wrap(
-                cek: Self::Cek,
+                cek: &Self::Cek,
                 key: &Self::Key,
                 settings: Self::WrapSettings,
-            ) -> Result<(Vec<u8>, Self::AlgorithmHeader), Error> {
-                let mut salt = Vec::with_capacity($name.len() + 1 + settings.salt.len());
-                salt.extend_from_slice($name.as_bytes());
+            ) -> Result<(Vec<u8>, Self::Header), Error> {
+                let name = super::Algorithm::PBES2(PBES2::$name).as_str();
+                let mut salt = Vec::with_capacity(name.len() + 1 + settings.salt.len());
+                salt.extend_from_slice(name.as_bytes());
                 salt.push(0);
                 salt.extend_from_slice(&settings.salt);
 
@@ -200,10 +205,11 @@ macro_rules! pbes2 {
             fn unwrap(
                 encrypted_cek: &[u8],
                 key: &Self::Key,
-                settings: Self::AlgorithmHeader,
+                settings: Self::Header,
             ) -> Result<Self::Cek, Error> {
-                let mut salt = Vec::with_capacity($name.len() + 1 + settings.salt.len());
-                salt.extend_from_slice($name.as_bytes());
+                let name = super::Algorithm::PBES2(PBES2::$name).as_str();
+                let mut salt = Vec::with_capacity(name.len() + 1 + settings.salt.len());
+                salt.extend_from_slice(name.as_bytes());
                 salt.push(0);
                 salt.extend_from_slice(&settings.salt);
 
@@ -232,9 +238,26 @@ macro_rules! pbes2 {
 /// * [`PBES2_HS256_A128KW`] - PBES2 key management algorithm using SHA256 and AES128
 /// * [`PBES2_HS384_A192KW`] - PBES2 key management algorithm using SHA384 and AES192
 /// * [`PBES2_HS512_A256KW`] - PBES2 key management algorithm using SHA512 and AES256
+#[derive(Clone, Copy)]
 pub struct Pbes2<Sha, Aes> {
     _sha: PhantomData<Sha>,
     _aes: PhantomData<Aes>,
+}
+
+impl<Sha, Aes> PartialEq for Pbes2<Sha, Aes> {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+impl<Sha, Aes> Eq for Pbes2<Sha, Aes> {}
+
+impl<Sha, Aes> std::fmt::Debug for Pbes2<Sha, Aes>
+where
+    Self: KMA,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(Self::ALG.as_str())
+    }
 }
 
 #[allow(non_camel_case_types)]
@@ -251,21 +274,21 @@ pbes2!(
     PBES2_HS256_A128KW,
     sha2::Sha256,
     Aes128,
-    "PBES2-HS256+A128KW",
+    HS256_A128KW,
     128 / 8
 );
 pbes2!(
     PBES2_HS384_A192KW,
     sha2::Sha384,
     Aes192,
-    "PBES2-HS384+A192KW",
+    HS384_A192KW,
     192 / 8
 );
 pbes2!(
     PBES2_HS512_A256KW,
     sha2::Sha512,
     Aes256,
-    "PBES2-HS512+A256KW",
+    HS512_A256KW,
     256 / 8
 );
 
@@ -465,7 +488,7 @@ mod tests {
             .to_vec(),
         );
         let key = OctetKey(b"Thus from my lips, by yours, my sin is purged.".to_vec());
-        let header = PBES2_Header {
+        let header = Pbes2Header {
             count: 4096,
             salt: vec![
                 217, 96, 147, 112, 150, 117, 70, 247, 127, 8, 155, 137, 174, 42, 80, 215,
@@ -488,7 +511,7 @@ mod tests {
     ) where
         K::Cek: Clone + PartialEq + std::fmt::Debug,
     {
-        let (encrypted_cek, header) = K::wrap(payload.clone(), key, settings).unwrap();
+        let (encrypted_cek, header) = K::wrap(&payload, key, settings).unwrap();
 
         assert_eq!(encrypted_cek, expected);
 

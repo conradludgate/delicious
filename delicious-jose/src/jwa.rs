@@ -4,18 +4,14 @@
 
 use std::fmt;
 
-use once_cell::sync::Lazy;
 use ring::constant_time::verify_slices_are_equal;
-use ring::rand::SystemRandom;
 use ring::signature::KeyPair;
-use ring::{hmac, rand, signature};
+use ring::{hmac, signature};
 use serde::{Deserialize, Serialize};
 
 use crate::errors::Error;
-use crate::jwk;
+use crate::jwk::{self, KeyType};
 use crate::jws::Secret;
-
-use ring::rand::SecureRandom;
 
 pub mod cea;
 pub mod kma;
@@ -23,20 +19,24 @@ pub mod kma;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OctetKey(Vec<u8>);
 
-/// AES GCM Nonce length, in bytes
-const AES_GCM_NONCE_LENGTH: usize = 96 / 8;
-/// AES CBC HMAC SHA Nonce length, in bytes
-const AES_CBC_HMAC_SHA_NONCE_LENGTH: usize = 128 / 8;
+impl OctetKey {
+    pub fn new(v: Vec<u8>) -> Self {
+        Self(v)
+    }
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
 
-/// A zeroed AES GCM Nonce EncryptionOptions
-static AES_GCM_ZEROED_NONCE: Lazy<EncryptionOptions> = Lazy::new(|| EncryptionOptions::AES_GCM {
-    nonce: vec![0; AES_GCM_NONCE_LENGTH],
-});
-/// A zeroed AES GCM Nonce EncryptionOptions
-static AES_CBC_HMAC_SHA_ZEROED_NONCE: Lazy<EncryptionOptions> =
-    Lazy::new(|| EncryptionOptions::AES_CBC_HMAC_SHA {
-        nonce: vec![0; AES_CBC_HMAC_SHA_NONCE_LENGTH],
-    });
+impl TryFrom<crate::jwk::Specified> for OctetKey {
+    type Error = Error;
+    fn try_from(value: crate::jwk::Specified) -> Result<Self, Self::Error> {
+        match value.algorithm {
+            jwk::AlgorithmParameters::OctetKey(v) => Ok(Self(v.value)),
+            _ => Err(unexpected_key_type_error!(KeyType::Octet, value.key_type())),
+        }
+    }
+}
 
 /// Options to be passed in while performing an encryption operation, if required by the algorithm.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -142,6 +142,19 @@ pub enum ContentEncryptionAlgorithm {
     A192GCM,
     /// AES GCM using 256-bit key
     A256GCM,
+}
+
+impl ContentEncryptionAlgorithm {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::A128CBC_HS256 => "A128CBC-HS256",
+            Self::A192CBC_HS384 => "A192CBC-HS384",
+            Self::A256CBC_HS512 => "A256CBC-HS512",
+            Self::A128GCM => "A128GCM",
+            Self::A192GCM => "A192GCM",
+            Self::A256GCM => "A256GCM",
+        }
+    }
 }
 
 /// The result returned from an encryption operation
@@ -265,7 +278,7 @@ impl SignatureAlgorithm {
             _ => Err("Invalid secret type. A RsaKeyPair is required".to_string())?,
         };
 
-        let rng = rand::SystemRandom::new();
+        let rng = ring::rand::SystemRandom::new();
         let mut signature = vec![0; key_pair.public_modulus_len()];
         let padding_algorithm: &dyn signature::RsaEncoding = match algorithm {
             SignatureAlgorithm::RS256 => &signature::RSA_PKCS1_SHA256,
@@ -294,7 +307,7 @@ impl SignatureAlgorithm {
             // See https://github.com/briansmith/ring/issues/268
             Err(Error::UnsupportedOperation)
         } else {
-            let rng = rand::SystemRandom::new();
+            let rng = ring::rand::SystemRandom::new();
             let sig = key_pair.as_ref().sign(&rng, data)?;
             Ok(sig.as_ref().to_vec())
         }
@@ -409,136 +422,12 @@ impl SignatureAlgorithm {
     }
 }
 
-impl ContentEncryptionAlgorithm {
-    /// Convenience function to generate a new random key with the required length
-    pub fn generate_key(self) -> Result<Vec<u8>, Error> {
-        use self::ContentEncryptionAlgorithm::{A128GCM, A256GCM};
-
-        let length: usize = match self {
-            A128GCM => 128 / 8,
-            A256GCM => 256 / 8,
-            _ => Err(Error::UnsupportedOperation)?,
-        };
-
-        let mut key: Vec<u8> = vec![0; length];
-        SystemRandom::new().fill(&mut key)?;
-        Ok(key)
-    }
-
-    /// Encrypt some payload with the provided algorith
-    pub fn encrypt(
-        self,
-        payload: &[u8],
-        aad: &[u8],
-        key: &jwk::Specified,
-        options: &EncryptionOptions,
-    ) -> Result<EncryptionResult, Error> {
-        use self::ContentEncryptionAlgorithm::{
-            A128CBC_HS256, A128GCM, A192CBC_HS384, A192GCM, A256CBC_HS512, A256GCM,
-        };
-
-        match self {
-            A128GCM | A192GCM | A256GCM => {
-                self.aes_gcm_encrypt(payload, aad, key.algorithm.octet_key()?, options)
-            }
-            A128CBC_HS256 | A192CBC_HS384 | A256CBC_HS512 => {
-                self.aes_cbc_encrypt(payload, aad, key, options)
-            }
-        }
-    }
-
-    /// Decrypt some payload with the provided algorith,
-    pub fn decrypt(
-        self,
-        encrypted: &EncryptionResult,
-        key: &jwk::Specified,
-    ) -> Result<Vec<u8>, Error> {
-        use self::ContentEncryptionAlgorithm::{
-            A128CBC_HS256, A128GCM, A192CBC_HS384, A192GCM, A256CBC_HS512, A256GCM,
-        };
-
-        match self {
-            A128GCM | A192GCM | A256GCM => self.aes_gcm_decrypt(encrypted, key.octet_key()?),
-            A128CBC_HS256 | A192CBC_HS384 | A256CBC_HS512 => self.aes_cbc_decrypt(encrypted, key),
-        }
-    }
-
-    /// Generate a new random `EncryptionOptions` based on the algorithm
-    pub(crate) fn random_encryption_options(self) -> Result<EncryptionOptions, Error> {
-        use self::ContentEncryptionAlgorithm::{
-            A128CBC_HS256, A128GCM, A192CBC_HS384, A192GCM, A256CBC_HS512, A256GCM,
-        };
-        match self {
-            A128GCM | A192GCM | A256GCM => Ok(EncryptionOptions::AES_GCM {
-                nonce: random_aes_gcm_nonce()?,
-            }),
-            A128CBC_HS256 | A192CBC_HS384 | A256CBC_HS512 => {
-                Ok(EncryptionOptions::AES_CBC_HMAC_SHA {
-                    nonce: random_aes_cbc_nonce()?,
-                })
-            }
-        }
-    }
-
-    fn aes_gcm_encrypt(
-        self,
-        payload: &[u8],
-        aad: &[u8],
-        key: &[u8],
-        options: &EncryptionOptions,
-    ) -> Result<EncryptionResult, Error> {
-        use self::ContentEncryptionAlgorithm::{A128GCM, A256GCM};
-        use cea::CEA;
-
-        let iv = match *options {
-            EncryptionOptions::AES_GCM { ref nonce } => nonce.to_vec(),
-            ref others => {
-                return Err(unexpected_encryption_options_error!(
-                    AES_GCM_ZEROED_NONCE,
-                    others
-                ))
-            }
-        };
-        let key = OctetKey(key.to_vec());
-        let aad = aad.to_vec();
-
-        match self {
-            A128GCM => cea::A128GCM::encrypt(&key, payload, iv, aad),
-            A256GCM => cea::A256GCM::encrypt(&key, payload, iv, aad),
-            _ => Err(Error::UnsupportedOperation),
-        }
-    }
-
-    fn aes_gcm_decrypt(self, encrypted: &EncryptionResult, key: &[u8]) -> Result<Vec<u8>, Error> {
-        use self::ContentEncryptionAlgorithm::{A128GCM, A256GCM};
-        use cea::CEA;
-
-        let key = OctetKey(key.to_vec());
-        match self {
-            A128GCM => cea::A128GCM::decrypt(&key, encrypted),
-            A256GCM => cea::A256GCM::decrypt(&key, encrypted),
-            _ => Err(Error::UnsupportedOperation),
-        }
-    }
-}
-
-pub(crate) fn random_aes_gcm_nonce() -> Result<Vec<u8>, Error> {
-    let mut nonce: Vec<u8> = vec![0; AES_GCM_NONCE_LENGTH];
-    SystemRandom::new().fill(&mut nonce)?;
-    Ok(nonce)
-}
-pub(crate) fn random_aes_cbc_nonce() -> Result<Vec<u8>, Error> {
-    let mut nonce: Vec<u8> = vec![0; AES_CBC_HMAC_SHA_NONCE_LENGTH];
-    SystemRandom::new().fill(&mut nonce)?;
-    Ok(nonce)
-}
-
 #[cfg(test)]
 mod tests {
-    use ring::constant_time::verify_slices_are_equal;
+    use rand::RngCore;
 
     use super::*;
-    use crate::jwa;
+    use crate::jwa::cea::CEA;
 
     #[test]
     fn sign_and_verify_none() {
@@ -884,80 +773,61 @@ mod tests {
             .unwrap();
     }
 
-    #[test]
-    fn rng_is_created() {
-        let rng = SystemRandom::new();
-        let mut random: Vec<u8> = vec![0; 8];
-        rng.fill(&mut random).unwrap();
-    }
-
     /// `ContentEncryptionAlgorithm::A128GCM` generates CEK of the right length
     #[test]
     fn aes128gcm_key_length() {
-        let enc_alg = jwa::ContentEncryptionAlgorithm::A128GCM;
-        let cek = not_err!(enc_alg.generate_key());
-        assert_eq!(cek.len(), 128 / 8);
+        assert_eq!(cea::A128GCM::generate_cek().as_bytes().len(), 128 / 8);
     }
 
     /// `ContentEncryptionAlgorithm::A256GCM` generates CEK of the right length
     #[test]
     fn aes256gcm_key_length() {
-        let enc_alg = jwa::ContentEncryptionAlgorithm::A256GCM;
-        let cek = not_err!(enc_alg.generate_key());
-        assert_eq!(cek.len(), 256 / 8);
+        assert_eq!(cea::A256GCM::generate_cek().as_bytes().len(), 256 / 8);
+    }
+
+    pub fn random_vec(len: usize) -> Vec<u8> {
+        let mut nonce = vec![0; len];
+        rand::thread_rng().fill_bytes(&mut nonce);
+        nonce
+    }
+
+    pub fn random_aes_gcm_nonce() -> Vec<u8> {
+        random_vec(12)
     }
 
     #[test]
     fn aes128gcm_encryption_round_trip() {
-        let mut key: Vec<u8> = vec![0; 128 / 8];
-        not_err!(SystemRandom::new().fill(&mut key));
-
-        let key = jwk::Specified {
-            common: Default::default(),
-            algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
-                key_type: Default::default(),
-                value: key,
-            }),
-        };
-
-        let options = EncryptionOptions::AES_GCM {
-            nonce: random_aes_gcm_nonce().unwrap(),
-        };
+        let key = OctetKey(random_vec(128 / 8));
 
         let payload = "狼よ、我が敵を食らえ！";
         let aad = "My servants never die!";
-        let enc_alg = jwa::ContentEncryptionAlgorithm::A128GCM;
-        let encrypted_payload =
-            not_err!(enc_alg.encrypt(payload.as_bytes(), aad.as_bytes(), &key, &options,));
+        let encrypted_payload = cea::A128GCM::encrypt(
+            &key,
+            payload.as_bytes(),
+            random_aes_gcm_nonce(),
+            aad.as_bytes().to_vec(),
+        )
+        .unwrap();
 
-        let decrypted_payload = not_err!(enc_alg.decrypt(&encrypted_payload, &key));
-        assert!(verify_slices_are_equal(payload.as_bytes(), &decrypted_payload).is_ok());
+        let decrypted_payload = cea::A128GCM::decrypt(&key, &encrypted_payload).unwrap();
+        assert_eq!(payload.as_bytes(), &decrypted_payload);
     }
 
     #[test]
     fn aes1256gcm_encryption_round_trip() {
-        let mut key: Vec<u8> = vec![0; 256 / 8];
-        not_err!(SystemRandom::new().fill(&mut key));
-
-        let key = jwk::Specified {
-            common: Default::default(),
-            algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
-                key_type: Default::default(),
-                value: key,
-            }),
-        };
-
-        let options = EncryptionOptions::AES_GCM {
-            nonce: random_aes_gcm_nonce().unwrap(),
-        };
+        let key = OctetKey(random_vec(256 / 8));
 
         let payload = "狼よ、我が敵を食らえ！";
         let aad = "My servants never die!";
-        let enc_alg = jwa::ContentEncryptionAlgorithm::A256GCM;
-        let encrypted_payload =
-            not_err!(enc_alg.encrypt(payload.as_bytes(), aad.as_bytes(), &key, &options,));
+        let encrypted_payload = cea::A256GCM::encrypt(
+            &key,
+            payload.as_bytes(),
+            random_aes_gcm_nonce(),
+            aad.as_bytes().to_vec(),
+        )
+        .unwrap();
 
-        let decrypted_payload = not_err!(enc_alg.decrypt(&encrypted_payload, &key));
-        assert!(verify_slices_are_equal(payload.as_bytes(), &decrypted_payload).is_ok());
+        let decrypted_payload = cea::A256GCM::decrypt(&key, &encrypted_payload).unwrap();
+        assert_eq!(payload.as_bytes(), &decrypted_payload);
     }
 }

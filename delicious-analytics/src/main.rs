@@ -7,17 +7,14 @@ use sha2::{Digest, Sha512};
 mod postgres;
 
 #[derive(Clone)]
-pub struct SecretKey(Vec<u8>);
+pub struct SecretKey(delicious_jose::jwa::OctetKey);
 
 impl SecretKey {
     fn from_request<B>(req: &RequestParts<B>) -> &Self {
         req.extensions().get().unwrap()
     }
-    fn to_jwk(&self) -> delicious_jose::jwk::Specified {
-        delicious_jose::jwk::Specified::new_octet_key(&self.0)
-    }
     fn to_secret(&self) -> delicious_jose::jws::Secret {
-        delicious_jose::jws::Secret::Bytes(self.0.clone())
+        delicious_jose::jws::Secret::Bytes(self.0.as_bytes().to_vec())
     }
 }
 
@@ -31,9 +28,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database_url = env::var("DATABASE_URL")?;
 
     let key = hash_salt.as_deref().unwrap_or(&database_url);
-    let mut key_hasher = Sha512::new();
-    key_hasher.update(key);
-    let key = SecretKey(hex::encode(key_hasher.finalize()).into_bytes());
+    let key = SecretKey(delicious_jose::jwa::OctetKey::new(
+        hex::encode(Sha512::new().chain_update(key).finalize()).into_bytes(),
+    ));
 
     let db = DbReconnector::connect(database_url.parse()?).await?;
 

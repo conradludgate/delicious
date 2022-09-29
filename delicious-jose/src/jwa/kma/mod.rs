@@ -1,17 +1,17 @@
 //! [Cryptographic Algorithms for Key Management](https://www.rfc-editor.org/rfc/rfc7518#section-4)
 
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{errors::Error, jwa::EncryptionResult, jwe::CekAlgorithmHeader, jwk};
+use crate::errors::Error;
 
-use super::ContentEncryptionAlgorithm;
+use super::OctetKey;
 
 pub(crate) mod aes_gcm;
 mod pbes2_aes_kw;
 
-pub use self::aes_gcm::{AES_GCM_Header, AesGcmKw, A128GCMKW, A256GCMKW, AES_GCM};
+pub use self::aes_gcm::{AesGcmKw, AesGcmKwHeader, A128GCMKW, A256GCMKW, AES_GCM};
 pub use pbes2_aes_kw::{
-    PBES2_Header, Pbes2, PBES2, PBES2_HS256_A128KW, PBES2_HS384_A192KW, PBES2_HS512_A256KW,
+    Pbes2, Pbes2Header, PBES2, PBES2_HS256_A128KW, PBES2_HS384_A192KW, PBES2_HS512_A256KW,
 };
 
 /// Algorithms for key management as defined in [RFC7518#4](https://tools.ietf.org/html/rfc7518#section-4)
@@ -86,248 +86,81 @@ impl Algorithm {
             }
         }
     }
-
-    /// Return the Content Encryption Key (CEK) based on the key management algorithm
-    ///
-    /// If the algorithm is `dir` or `DirectSymmetricKey`, the key provided is the CEK.
-    /// Otherwise, the appropriate algorithm will be used to derive or generate the required CEK
-    /// using the provided key.
-    pub fn cek(
-        self,
-        content_alg: ContentEncryptionAlgorithm,
-        key: &jwk::Specified,
-    ) -> Result<jwk::Specified, Error> {
-        use self::Algorithm::{DirectSymmetricKey, AES_GCM_KW};
-
-        match self {
-            DirectSymmetricKey => Self::cek_direct(key),
-            AES_GCM_KW(_) => Self::cek_aes_gcm(content_alg),
-            // PBES2_HS256_A128KW | PBES2_HS384_A192KW | PBES2_HS512_A256KW => Self::cek_pbes2(key),
-            _ => Err(Error::UnsupportedOperation),
-        }
-    }
-
-    fn cek_direct(key: &jwk::Specified) -> Result<jwk::Specified, Error> {
-        match key.key_type() {
-            jwk::KeyType::Octet => Ok(key.clone()),
-            others => Err(unexpected_key_type_error!(jwk::KeyType::Octet, others)),
-        }
-    }
-
-    fn cek_aes_gcm(content_alg: ContentEncryptionAlgorithm) -> Result<jwk::Specified, Error> {
-        let key = content_alg.generate_key()?;
-        Ok(jwk::Specified {
-            algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
-                value: key,
-                key_type: Default::default(),
-            }),
-            common: jwk::CommonParameters {
-                public_key_use: Some(jwk::PublicKeyUse::Encryption),
-                algorithm: Some(super::Algorithm::ContentEncryption(content_alg)),
-                ..Default::default()
-            },
-        })
-    }
-
-    /// Encrypt or wrap a Content Encryption Key with the provided algorithm
-    pub fn wrap_key(
-        self,
-        payload: &[u8],
-        key: &jwk::Specified,
-        header: &mut CekAlgorithmHeader,
-    ) -> Result<Vec<u8>, Error> {
-        use self::Algorithm::{DirectSymmetricKey, AES_GCM_KW, PBES2};
-
-        match self {
-            AES_GCM_KW(kma) => {
-                let nonce = header.nonce.as_deref().ok_or(Error::UnsupportedOperation)?;
-                let encrypted = kma.aes_gcm_encrypt(payload, key.algorithm.octet_key()?, nonce)?;
-                header.tag = Some(encrypted.tag);
-                Ok(encrypted.encrypted)
-            }
-            PBES2(kma) => kma.encrypt(
-                payload,
-                key.algorithm.octet_key()?,
-                header.salt.as_deref().ok_or(Error::UnsupportedOperation)?,
-                header.count.unwrap_or_default(),
-            ),
-            DirectSymmetricKey => Ok(Vec::new()),
-            _ => Err(Error::UnsupportedOperation),
-        }
-    }
-
-    /// Decrypt or unwrap a CEK with the provided algorithm
-    pub fn unwrap_key(
-        self,
-        encrypted: &[u8],
-        header: &mut CekAlgorithmHeader,
-        key: &jwk::Specified,
-    ) -> Result<jwk::Specified, Error> {
-        use self::Algorithm::{DirectSymmetricKey, AES_GCM_KW, PBES2};
-
-        match self {
-            AES_GCM_KW(kma) => {
-                let value = kma.aes_gcm_decrypt(
-                    &EncryptionResult {
-                        encrypted: encrypted.to_vec(),
-                        nonce: header.nonce.take().unwrap_or_default(),
-                        tag: header.tag.take().unwrap_or_default(),
-                        ..Default::default()
-                    },
-                    key.algorithm.octet_key()?,
-                )?;
-                Ok(jwk::Specified {
-                    algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
-                        value,
-                        key_type: Default::default(),
-                    }),
-                    common: jwk::CommonParameters {
-                        public_key_use: Some(jwk::PublicKeyUse::Encryption),
-                        algorithm: None,
-                        ..Default::default()
-                    },
-                })
-            }
-            PBES2(kma) => {
-                let value = kma.decrypt(
-                    encrypted,
-                    key.algorithm.octet_key()?,
-                    &header.salt.take().ok_or(Error::UnsupportedOperation)?,
-                    header.count.take().unwrap_or_default(),
-                )?;
-
-                Ok(jwk::Specified {
-                    algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
-                        value,
-                        key_type: Default::default(),
-                    }),
-                    common: jwk::CommonParameters {
-                        public_key_use: Some(jwk::PublicKeyUse::Encryption),
-                        ..Default::default()
-                    },
-                })
-            }
-            DirectSymmetricKey => Ok(key.clone()),
-            _ => Err(Error::UnsupportedOperation),
-        }
-    }
 }
 
 /// [Cryptographic Algorithms for Key Management](https://www.rfc-editor.org/rfc/rfc7518#section-4)
 pub trait KMA {
     /// The name specified in the `alg` header.
-    const ALG: &'static str;
+    const ALG: Algorithm;
 
     /// Key used to derive the Cek
     type Key;
     /// Content Encryption Key
     type Cek;
     /// Values to store in the header, used to unwrap the Cek
-    type AlgorithmHeader;
+    type Header: Serialize + DeserializeOwned;
     /// Settings used to wrap the key
     type WrapSettings;
 
+    /// Generate a key for the CEA
+    fn generate_key<CEA>(_key: &Self::Key) -> Self::Cek
+    where
+        CEA: super::cea::CEA<Cek = Self::Cek>,
+    {
+        CEA::generate_cek()
+    }
+
     /// Wraps the content encryption key
     fn wrap(
-        cek: Self::Cek,
+        cek: &Self::Cek,
         key: &Self::Key,
         settings: Self::WrapSettings,
-    ) -> Result<(Vec<u8>, Self::AlgorithmHeader), Error>;
+    ) -> Result<(Vec<u8>, Self::Header), Error>;
 
     /// unwraps the content encryption key
     fn unwrap(
         encrypted_cek: &[u8],
         key: &Self::Key,
-        settings: Self::AlgorithmHeader,
+        settings: Self::Header,
     ) -> Result<Self::Cek, Error>;
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ring::{
-        constant_time::verify_slices_are_equal,
-        rand::{SecureRandom, SystemRandom},
-    };
+/// [Direct Encryption with a Shared Symmetric Key](https://datatracker.ietf.org/doc/html/rfc7518#section-4.5)
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct DirectEncryption;
 
-    use crate::{jwa, jwk};
+impl KMA for DirectEncryption {
+    const ALG: Algorithm = Algorithm::DirectSymmetricKey;
+    type Key = OctetKey;
+    type Cek = OctetKey;
+    type Header = ();
+    type WrapSettings = ();
 
-    /// `KeyManagementAlgorithm::DirectSymmetricKey` returns the same key when CEK is requested
-    #[test]
-    fn dir_cek_returns_provided_key() {
-        let mut key: Vec<u8> = vec![0; 256 / 8];
-        not_err!(SystemRandom::new().fill(&mut key));
-
-        let key = jwk::Specified {
-            common: Default::default(),
-            algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
-                key_type: Default::default(),
-                value: key,
-            }),
-        };
-
-        let cek_alg = Algorithm::DirectSymmetricKey;
-        let cek = not_err!(cek_alg.cek(jwa::ContentEncryptionAlgorithm::A256GCM, &key));
-
-        assert!(
-            verify_slices_are_equal(cek.octet_key().unwrap(), key.octet_key().unwrap()).is_ok()
-        );
+    fn generate_key<CEA>(key: &Self::Key) -> Self::Cek
+    where
+        CEA: super::cea::CEA<Cek = Self::Cek>,
+    {
+        key.clone()
     }
 
-    /// `KeyManagementAlgorithm::A128GCMKW` returns a random key with the right length when CEK is requested
-    #[test]
-    fn cek_aes128gcmkw_returns_right_key_length() {
-        let mut key: Vec<u8> = vec![0; 128 / 8];
-        not_err!(SystemRandom::new().fill(&mut key));
-
-        let key = jwk::Specified {
-            common: Default::default(),
-            algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
-                key_type: Default::default(),
-                value: key,
-            }),
-        };
-
-        let cek_alg = Algorithm::AES_GCM_KW(AES_GCM::A128);
-        let cek = not_err!(cek_alg.cek(jwa::ContentEncryptionAlgorithm::A128GCM, &key));
-        assert_eq!(cek.octet_key().unwrap().len(), 128 / 8);
-        assert!(
-            verify_slices_are_equal(cek.octet_key().unwrap(), key.octet_key().unwrap()).is_err()
-        );
-
-        let cek = not_err!(cek_alg.cek(jwa::ContentEncryptionAlgorithm::A256GCM, &key));
-        assert_eq!(cek.octet_key().unwrap().len(), 256 / 8);
-        assert!(
-            verify_slices_are_equal(cek.octet_key().unwrap(), key.octet_key().unwrap()).is_err()
-        );
+    fn wrap(
+        _cek: &Self::Cek,
+        _key: &Self::Key,
+        _settings: Self::WrapSettings,
+    ) -> Result<(Vec<u8>, Self::Header), Error> {
+        Ok((vec![], ()))
     }
 
-    /// `KeyManagementAlgorithm::A256GCMKW` returns a random key with the right length when CEK is requested
-    #[test]
-    fn cek_aes256gcmkw_returns_right_key_length() {
-        let mut key: Vec<u8> = vec![0; 256 / 8];
-        not_err!(SystemRandom::new().fill(&mut key));
-
-        let key = jwk::Specified {
-            common: Default::default(),
-            algorithm: jwk::AlgorithmParameters::OctetKey(jwk::OctetKeyParameters {
-                key_type: Default::default(),
-                value: key,
-            }),
-        };
-
-        let cek_alg = Algorithm::AES_GCM_KW(AES_GCM::A256);
-        let cek = not_err!(cek_alg.cek(jwa::ContentEncryptionAlgorithm::A128GCM, &key));
-        assert_eq!(cek.octet_key().unwrap().len(), 128 / 8);
-        assert!(
-            verify_slices_are_equal(cek.octet_key().unwrap(), key.octet_key().unwrap()).is_err()
-        );
-
-        let cek = not_err!(cek_alg.cek(jwa::ContentEncryptionAlgorithm::A256GCM, &key));
-        assert_eq!(cek.octet_key().unwrap().len(), 256 / 8);
-        assert!(
-            verify_slices_are_equal(cek.octet_key().unwrap(), key.octet_key().unwrap()).is_err()
-        );
+    fn unwrap(
+        encrypted_cek: &[u8],
+        key: &Self::Key,
+        _settings: Self::Header,
+    ) -> Result<Self::Cek, Error> {
+        if encrypted_cek.is_empty() {
+            Ok(key.clone())
+        } else {
+            Err(Error::DecodeError(crate::errors::DecodeError::InvalidToken))
+        }
     }
 }
 
@@ -439,31 +272,111 @@ mod serde_impl {
         }
     }
 
+    impl Algorithm {
+        pub fn as_str(&self) -> &'static str {
+            match *self {
+                Algorithm::RSA1_5 => "RSA1_5",
+                Algorithm::RSA_OAEP => "RSA-OAEP",
+                Algorithm::RSA_OAEP_256 => "RSA-OAEP-256",
+                Algorithm::A128KW => "A128KW",
+                Algorithm::A192KW => "A192KW",
+                Algorithm::A256KW => "A256KW",
+                Algorithm::DirectSymmetricKey => "dir",
+                Algorithm::ECDH_ES => "ECDH-ES",
+                Algorithm::ECDH_ES_A128KW => "ECDH-ES+A128KW",
+                Algorithm::ECDH_ES_A192KW => "ECDH-ES+A192KW",
+                Algorithm::ECDH_ES_A256KW => "ECDH-ES+A256KW",
+                Algorithm::AES_GCM_KW(AES_GCM::A128) => "A128GCMKW",
+                Algorithm::AES_GCM_KW(AES_GCM::A192) => "A192GCMKW",
+                Algorithm::AES_GCM_KW(AES_GCM::A256) => "A256GCMKW",
+                Algorithm::PBES2(PBES2::HS256_A128KW) => "PBES2-HS256+A128KW",
+                Algorithm::PBES2(PBES2::HS384_A192KW) => "PBES2-HS384+A192KW",
+                Algorithm::PBES2(PBES2::HS512_A256KW) => "PBES2-HS512+A256KW",
+            }
+        }
+    }
+
     impl serde::Serialize for Algorithm {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: serde::Serializer,
         {
-            let (idx, name) = match *self {
-                Algorithm::RSA1_5 => (0u32, "RSA1_5"),
-                Algorithm::RSA_OAEP => (1u32, "RSA-OAEP"),
-                Algorithm::RSA_OAEP_256 => (2u32, "RSA-OAEP-256"),
-                Algorithm::A128KW => (3u32, "A128KW"),
-                Algorithm::A192KW => (4u32, "A192KW"),
-                Algorithm::A256KW => (5u32, "A256KW"),
-                Algorithm::DirectSymmetricKey => (6u32, "dir"),
-                Algorithm::ECDH_ES => (7u32, "ECDH-ES"),
-                Algorithm::ECDH_ES_A128KW => (8u32, "ECDH-ES+A128KW"),
-                Algorithm::ECDH_ES_A192KW => (9u32, "ECDH-ES+A192KW"),
-                Algorithm::ECDH_ES_A256KW => (10u32, "ECDH-ES+A256KW"),
-                Algorithm::AES_GCM_KW(AES_GCM::A128) => (11u32, "A128GCMKW"),
-                Algorithm::AES_GCM_KW(AES_GCM::A192) => (12u32, "A192GCMKW"),
-                Algorithm::AES_GCM_KW(AES_GCM::A256) => (13u32, "A256GCMKW"),
-                Algorithm::PBES2(PBES2::HS256_A128KW) => (14u32, "PBES2-HS256+A128KW"),
-                Algorithm::PBES2(PBES2::HS384_A192KW) => (15u32, "PBES2-HS384+A192KW"),
-                Algorithm::PBES2(PBES2::HS512_A256KW) => (16u32, "PBES2-HS512+A256KW"),
+            let idx = match *self {
+                Algorithm::RSA1_5 => 0u32,
+                Algorithm::RSA_OAEP => 1u32,
+                Algorithm::RSA_OAEP_256 => 2u32,
+                Algorithm::A128KW => 3u32,
+                Algorithm::A192KW => 4u32,
+                Algorithm::A256KW => 5u32,
+                Algorithm::DirectSymmetricKey => 6u32,
+                Algorithm::ECDH_ES => 7u32,
+                Algorithm::ECDH_ES_A128KW => 8u32,
+                Algorithm::ECDH_ES_A192KW => 9u32,
+                Algorithm::ECDH_ES_A256KW => 10u32,
+                Algorithm::AES_GCM_KW(AES_GCM::A128) => 11u32,
+                Algorithm::AES_GCM_KW(AES_GCM::A192) => 12u32,
+                Algorithm::AES_GCM_KW(AES_GCM::A256) => 13u32,
+                Algorithm::PBES2(PBES2::HS256_A128KW) => 14u32,
+                Algorithm::PBES2(PBES2::HS384_A192KW) => 15u32,
+                Algorithm::PBES2(PBES2::HS512_A256KW) => 16u32,
             };
-            serializer.serialize_unit_variant("KeyManagementAlgorithm", idx, name)
+            serializer.serialize_unit_variant("KeyManagementAlgorithm", idx, self.as_str())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::RngCore;
+
+    use crate::jwa::cea;
+
+    pub fn random_vec(len: usize) -> Vec<u8> {
+        let mut nonce = vec![0; len];
+        rand::thread_rng().fill_bytes(&mut nonce);
+        nonce
+    }
+
+    fn cek_oct_key(len: usize) -> OctetKey {
+        OctetKey::new(random_vec(len))
+    }
+
+    /// `KeyManagementAlgorithm::DirectSymmetricKey` returns the same key when CEK is requested
+    #[test]
+    fn dir_cek_returns_provided_key() {
+        let key = cek_oct_key(256 / 8);
+
+        let cek = DirectEncryption::generate_key::<cea::A256GCM>(&key);
+
+        assert_eq!(cek, key);
+    }
+
+    /// `KeyManagementAlgorithm::A128GCMKW` returns a random key with the right length when CEK is requested
+    #[test]
+    fn cek_aes128gcmkw_returns_right_key_length() {
+        let key = cek_oct_key(128 / 8);
+
+        let cek = A128GCMKW::generate_key::<cea::A128GCM>(&key);
+        assert_eq!(cek.as_bytes().len(), 128 / 8);
+        assert_ne!(cek, key);
+
+        let cek = A128GCMKW::generate_key::<cea::A256GCM>(&key);
+        assert_eq!(cek.as_bytes().len(), 256 / 8);
+        assert_ne!(cek, key);
+    }
+
+    /// `KeyManagementAlgorithm::A256GCMKW` returns a random key with the right length when CEK is requested
+    #[test]
+    fn cek_aes256gcmkw_returns_right_key_length() {
+        let key = cek_oct_key(256 / 8);
+
+        let cek = A256GCMKW::generate_key::<cea::A128GCM>(&key);
+        assert_eq!(cek.as_bytes().len(), 128 / 8);
+        assert_ne!(cek, key);
+
+        let cek = A256GCMKW::generate_key::<cea::A256GCM>(&key);
+        assert_eq!(cek.as_bytes().len(), 256 / 8);
+        assert_ne!(cek, key);
     }
 }
