@@ -2,9 +2,7 @@
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::errors::Error;
-
-use super::OctetKey;
+use crate::{errors::Error, jwk::OctetKey};
 
 pub(crate) mod aes_gcm;
 mod pbes2_aes_kw;

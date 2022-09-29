@@ -5,7 +5,7 @@ pub(crate) mod aes_cbc_hmac_sha;
 pub(crate) mod aes_gcm;
 pub use self::aes_gcm::{AesGcm, A128GCM, A256GCM};
 pub use aes_cbc_hmac_sha::{AesCbcHmacSha2, A128CBC_HS256, A192CBC_HS384, A256CBC_HS512};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// [Cryptographic Algorithms for Content Encryption](https://datatracker.ietf.org/doc/html/rfc7518#section-5)
 pub trait CEA {

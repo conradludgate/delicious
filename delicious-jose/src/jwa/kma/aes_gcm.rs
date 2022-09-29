@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{errors::Error, jwa::OctetKey};
+use crate::{errors::Error, jwk::OctetKey};
 
 use super::KMA;
 
@@ -76,7 +76,8 @@ macro_rules! aes_gcm {
                 key: &Self::Key,
                 settings: Self::WrapSettings,
             ) -> Result<(Vec<u8>, Self::Header), Error> {
-                let res = AesGcm::<$aes>::encrypt_inner(&key.0, &cek.0, settings, Vec::new())?;
+                let res =
+                    AesGcm::<$aes>::encrypt_inner(&key.value, &cek.value, settings, Vec::new())?;
                 let header = AesGcmKwHeader {
                     nonce: res.nonce,
                     tag: res.tag,
@@ -90,13 +91,13 @@ macro_rules! aes_gcm {
                 header: Self::Header,
             ) -> Result<Self::Cek, Error> {
                 let res = AesGcm::<$aes>::decrypt_inner(
-                    &key.0,
+                    &key.value,
                     encrypted_cek,
                     &header.nonce,
                     &header.tag,
                     &[],
                 )?;
-                Ok(OctetKey(res))
+                Ok(OctetKey::new(res))
             }
         }
     };
@@ -122,8 +123,8 @@ mod tests {
 
     #[test]
     fn aes128gcmkw_key_encryption_round_trip() {
-        let key = OctetKey(random_vec(128 / 8));
-        let cek = OctetKey(random_vec(128 / 8));
+        let key = OctetKey::new(random_vec(128 / 8));
+        let cek = OctetKey::new(random_vec(128 / 8));
         let nonce = random_aes_gcm_nonce();
 
         let (encrypted_cek, settings) = A128GCMKW::wrap(&cek, &key, nonce).unwrap();
@@ -134,8 +135,8 @@ mod tests {
 
     #[test]
     fn aes256gcmkw_key_encryption_round_trip() {
-        let key = OctetKey(random_vec(256 / 8));
-        let cek = OctetKey(random_vec(128 / 8));
+        let key = OctetKey::new(random_vec(256 / 8));
+        let cek = OctetKey::new(random_vec(128 / 8));
         let nonce = random_aes_gcm_nonce();
 
         let (encrypted_cek, settings) = A256GCMKW::wrap(&cek, &key, nonce).unwrap();

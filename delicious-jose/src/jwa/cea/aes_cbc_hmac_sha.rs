@@ -5,7 +5,7 @@ use cipher::block_padding::Pkcs7;
 use hmac::Hmac;
 
 use super::{Algorithm, EncryptionResult, CEA};
-use crate::{errors::Error, jwa::OctetKey};
+use crate::{errors::Error, jwk::OctetKey};
 
 /// [Content Encryption with AES_CBC_HMAC_SHA2](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2)
 ///
@@ -40,7 +40,7 @@ macro_rules! aes_cbc {
                 let mut rng = rand::thread_rng();
                 let mut key = vec![0; $key_len * 2];
                 rand::Rng::fill(&mut rng, key.as_mut_slice());
-                OctetKey(key)
+                OctetKey::new(key)
             }
 
             fn encrypt(
@@ -52,11 +52,11 @@ macro_rules! aes_cbc {
                 use aes::cipher::KeyIvInit;
                 use hmac::Mac;
 
-                if cek.0.len() != $key_len * 2 {
+                if cek.value.len() != $key_len * 2 {
                     return Err(Error::UnspecifiedCryptographicError);
                 }
 
-                let (mac_key, enc_key) = cek.0.split_at($key_len);
+                let (mac_key, enc_key) = cek.value.split_at($key_len);
 
                 // encrypt the payload using aes-cbc
                 let encrypted = cbc::Encryptor::<$aes>::new_from_slices(enc_key, &iv)?
@@ -91,10 +91,10 @@ macro_rules! aes_cbc {
                     additional_data: aad,
                 } = res;
 
-                if cek.0.len() != $key_len * 2 || tag.len() != $key_len {
+                if cek.value.len() != $key_len * 2 || tag.len() != $key_len {
                     return Err(Error::UnspecifiedCryptographicError);
                 }
-                let (mac_key, enc_key) = cek.0.split_at($key_len);
+                let (mac_key, enc_key) = cek.value.split_at($key_len);
 
                 // validate the hmac
                 Hmac::<$sha>::new_from_slice(mac_key)?
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn aes128sha256() {
-        let key = OctetKey(
+        let key = OctetKey::new(
             hex!(
                 "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
                 "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"
@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn aes192sha384() {
-        let key = OctetKey(
+        let key = OctetKey::new(
             hex!(
                 "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
                 "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn aes256sha512() {
-        let key = OctetKey(
+        let key = OctetKey::new(
             hex!(
                 "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
                 "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"

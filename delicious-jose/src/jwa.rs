@@ -4,34 +4,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::errors::Error;
-use crate::jwk::{self, KeyType};
-
 pub mod cea;
 pub mod kma;
 pub mod sign;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OctetKey(Vec<u8>);
-
-impl OctetKey {
-    pub fn new(v: Vec<u8>) -> Self {
-        Self(v)
-    }
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl TryFrom<crate::jwk::Specified> for OctetKey {
-    type Error = Error;
-    fn try_from(value: crate::jwk::Specified) -> Result<Self, Self::Error> {
-        match value.algorithm {
-            jwk::AlgorithmParameters::OctetKey(v) => Ok(Self(v.value)),
-            _ => Err(unexpected_key_type_error!(KeyType::Octet, value.key_type())),
-        }
-    }
-}
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
 /// Algorithms described by [RFC 7518](https://tools.ietf.org/html/rfc7518).

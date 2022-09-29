@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
 use crate::errors::Error;
-use crate::jwa::OctetKey;
+use crate::jwk::OctetKey;
 
 use super::KMA;
 
@@ -39,8 +39,8 @@ impl PBES2 {
     ) -> Result<Vec<u8>, Error> {
         use PBES2::{HS256_A128KW, HS384_A192KW, HS512_A256KW};
 
-        let cek = OctetKey(payload.to_vec());
-        let key = OctetKey(key.to_vec());
+        let cek = OctetKey::new(payload.to_vec());
+        let key = OctetKey::new(key.to_vec());
         let header = Pbes2Header {
             count,
             salt: base64::decode_config(salt, base64::URL_SAFE_NO_PAD)?,
@@ -61,15 +61,15 @@ impl PBES2 {
     ) -> Result<Vec<u8>, Error> {
         use PBES2::{HS256_A128KW, HS384_A192KW, HS512_A256KW};
 
-        let key = OctetKey(key.to_vec());
+        let key = OctetKey::new(key.to_vec());
         let header = Pbes2Header {
             count,
             salt: base64::decode_config(salt, base64::URL_SAFE_NO_PAD)?,
         };
         Ok(match self {
-            HS256_A128KW => PBES2_HS256_A128KW::unwrap(encrypted, &key, header)?.0,
-            HS384_A192KW => PBES2_HS384_A192KW::unwrap(encrypted, &key, header)?.0,
-            HS512_A256KW => PBES2_HS512_A256KW::unwrap(encrypted, &key, header)?.0,
+            HS256_A128KW => PBES2_HS256_A128KW::unwrap(encrypted, &key, header)?.value,
+            HS384_A192KW => PBES2_HS384_A192KW::unwrap(encrypted, &key, header)?.value,
+            HS512_A256KW => PBES2_HS512_A256KW::unwrap(encrypted, &key, header)?.value,
         })
     }
 }
@@ -190,9 +190,9 @@ macro_rules! pbes2 {
                 salt.extend_from_slice(&settings.salt);
 
                 let mut dk = [0; $key_len];
-                pbkdf2::pbkdf2::<Hmac<$sha>>(&key.0, &salt, settings.count, &mut dk);
+                pbkdf2::pbkdf2::<Hmac<$sha>>(&key.value, &salt, settings.count, &mut dk);
 
-                let payload = &cek.0;
+                let payload = &cek.value;
                 let len = next_multiple_of_8(payload.len());
                 let mut out = vec![0; len + 8];
                 out[8..][..payload.len()].copy_from_slice(payload);
@@ -214,7 +214,7 @@ macro_rules! pbes2 {
                 salt.extend_from_slice(&settings.salt);
 
                 let mut dk = [0; $key_len];
-                pbkdf2::pbkdf2::<Hmac<$sha>>(&key.0, &salt, settings.count, &mut dk);
+                pbkdf2::pbkdf2::<Hmac<$sha>>(&key.value, &salt, settings.count, &mut dk);
 
                 let len = next_multiple_of_8(encrypted_cek.len());
                 let mut out = vec![0; len];
@@ -225,7 +225,7 @@ macro_rules! pbes2 {
                 out.rotate_left(8);
                 out.truncate(len - 8);
 
-                Ok(OctetKey(out))
+                Ok(OctetKey::new(out))
             }
         }
     };
@@ -480,14 +480,14 @@ mod tests {
     #[test]
     // https://www.rfc-editor.org/rfc/rfc7517.html#appendix-C.2
     fn pbes2_hs256_a128kw_generic() {
-        let payload = OctetKey(
+        let payload = OctetKey::new(
             [
                 111, 27, 25, 52, 66, 29, 20, 78, 92, 176, 56, 240, 65, 208, 82, 112, 161, 131, 36,
                 55, 202, 236, 185, 172, 129, 23, 153, 194, 195, 48, 253, 182,
             ]
             .to_vec(),
         );
-        let key = OctetKey(b"Thus from my lips, by yours, my sin is purged.".to_vec());
+        let key = OctetKey::new(b"Thus from my lips, by yours, my sin is purged.".to_vec());
         let header = Pbes2Header {
             count: 4096,
             salt: vec![

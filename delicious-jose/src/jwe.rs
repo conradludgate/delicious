@@ -532,8 +532,8 @@ mod tests {
         random_vec(12)
     }
 
-    fn cek_oct_key(len: usize) -> jwa::OctetKey {
-        jwa::OctetKey::new(random_vec(len))
+    fn cek_oct_key(len: usize) -> jwk::OctetKey {
+        jwk::OctetKey::new(random_vec(len))
     }
 
     #[test]
@@ -619,10 +619,10 @@ mod tests {
         let key_json = r#"{"k":"-wcjSeVOJ0V43ij5uDBeFlOR1w2T40jqIfICQb8-sUw","kty":"oct"}"#;
 
         let key: jwk::JWK<()> = serde_json::from_str(key_json).unwrap();
-        let key = key.specified.try_into().unwrap();
+        let key = key.specified.octet_key().unwrap();
         let token: Encrypted<kma::DirectEncryption> = external_token.parse().unwrap();
 
-        let decrypted_jwe = token.decrypt::<Json<String>, cea::A256GCM>(&key).unwrap();
+        let decrypted_jwe = token.decrypt::<Json<String>, cea::A256GCM>(key).unwrap();
 
         let decrypted_payload = decrypted_jwe.payload;
         assert_eq!(decrypted_payload.0, "Encrypted");
