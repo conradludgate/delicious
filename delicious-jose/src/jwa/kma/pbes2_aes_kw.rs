@@ -1,17 +1,14 @@
+use aead::KeyInit;
 use aes::cipher::{Block, BlockDecryptMut, BlockEncryptMut};
 use aes::{Aes128, Aes192, Aes256};
-use digest::{
-    block_buffer::Eager,
-    core_api::{BlockSizeUser, BufferKindUser, FixedOutputCore, UpdateCore},
-    generic_array::typenum::{IsLess, Le, NonZero, U256},
-    FixedOutput, HashMarker, KeyInit, Update,
-};
+use digest::core_api::BlockSizeUser;
 use hmac::Hmac;
-use std::ops::{Index, IndexMut, RangeFull};
+use std::marker::PhantomData;
 
 use crate::errors::Error;
+use crate::jwa::OctetKey;
 
-use super::{OctetKey, KMA};
+use super::KMA;
 
 /// PBES2 with HMAC SHA and AES key-wrapping. [RFC7518#4.8](https://tools.ietf.org/html/rfc7518#section-4.8)
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -168,106 +165,86 @@ pub struct PBES2_Header {
     salt: Vec<u8>,
 }
 
-#[allow(non_camel_case_types)]
-trait KMA_PBES2 {
-    type SHA;
-    type AES;
-    const NAME: &'static [u8];
-    type Array: Index<RangeFull, Output = [u8]> + IndexMut<RangeFull> + Default;
+macro_rules! pbes2 {
+    ($sha:ty, $aes:ty, $name:literal, $key_len:expr) => {
+        impl KMA for PBES2Alg<$sha, $aes> {
+            const ALG: &'static str = $name;
+            type Key = OctetKey;
+            type Cek = OctetKey;
+            type AlgorithmHeader = PBES2_Header;
+            type WrapSettings = PBES2_Header;
+
+            fn wrap(
+                cek: Self::Cek,
+                key: &Self::Key,
+                settings: Self::WrapSettings,
+            ) -> Result<(Vec<u8>, Self::AlgorithmHeader), Error> {
+                let mut salt = Vec::with_capacity($name.len() + 1 + settings.salt.len());
+                salt.extend_from_slice($name.as_bytes());
+                salt.push(0);
+                salt.extend_from_slice(&settings.salt);
+
+                let mut dk = [0; $key_len];
+                pbkdf2::pbkdf2::<Hmac<$sha>>(&key.0, &salt, settings.count, &mut dk);
+
+                let payload = &cek.0;
+                let len = next_multiple_of_8(payload.len());
+                let mut out = vec![0; len + 8];
+                out[8..][..payload.len()].copy_from_slice(payload);
+
+                aes_key_wrap(<$aes>::new_from_slice(&dk)?, &mut out);
+
+                Ok((out, settings))
+            }
+
+            fn unwrap(
+                encrypted_cek: &[u8],
+                key: &Self::Key,
+                settings: Self::AlgorithmHeader,
+            ) -> Result<Self::Cek, Error> {
+                let mut salt = Vec::with_capacity($name.len() + 1 + settings.salt.len());
+                salt.extend_from_slice($name.as_bytes());
+                salt.push(0);
+                salt.extend_from_slice(&settings.salt);
+
+                let mut dk = [0; $key_len];
+                pbkdf2::pbkdf2::<Hmac<$sha>>(&key.0, &salt, settings.count, &mut dk);
+
+                let len = next_multiple_of_8(encrypted_cek.len());
+                let mut out = vec![0; len];
+                out[..encrypted_cek.len()].copy_from_slice(encrypted_cek);
+
+                aes_key_unwrap(<$aes>::new_from_slice(&dk)?, &mut out)?;
+
+                out.rotate_left(8);
+                out.truncate(len - 8);
+
+                Ok(OctetKey(out))
+            }
+        }
+    };
 }
 
 #[allow(non_camel_case_types)]
-pub struct PBES2_HS256_A128KW;
+/// Generic PBES2 key management algorithm
+pub struct PBES2Alg<Sha, Aes> {
+    _sha: PhantomData<Sha>,
+    _aes: PhantomData<Aes>,
+}
+
 #[allow(non_camel_case_types)]
-pub struct PBES2_HS384_A192KW;
+/// PBES2 key management algorithm using SHA256 and AES128
+pub type PBES2_HS256_A128KW = PBES2Alg<sha2::Sha256, Aes128>;
 #[allow(non_camel_case_types)]
-pub struct PBES2_HS512_A256KW;
+/// PBES2 key management algorithm using SHA384 and AES192
+pub type PBES2_HS384_A192KW = PBES2Alg<sha2::Sha384, Aes192>;
+#[allow(non_camel_case_types)]
+/// PBES2 key management algorithm using SHA512 and AES256
+pub type PBES2_HS512_A256KW = PBES2Alg<sha2::Sha512, Aes256>;
 
-impl KMA_PBES2 for PBES2_HS256_A128KW {
-    type SHA = sha2::Sha256;
-    type AES = Aes128;
-    const NAME: &'static [u8] = b"PBES2-HS256+A128KW";
-    type Array = [u8; 128 / 8];
-}
-impl KMA_PBES2 for PBES2_HS384_A192KW {
-    type SHA = sha2::Sha384;
-    type AES = Aes192;
-    const NAME: &'static [u8] = b"PBES2-HS384+A192KW";
-    type Array = [u8; 192 / 8];
-}
-impl KMA_PBES2 for PBES2_HS512_A256KW {
-    type SHA = sha2::Sha512;
-    type AES = Aes256;
-    const NAME: &'static [u8] = b"PBES2-HS512+A256KW";
-    type Array = [u8; 256 / 8];
-}
-
-impl<PBES2: KMA_PBES2> KMA for PBES2
-where
-    PBES2::SHA: digest::core_api::CoreProxy,
-    <PBES2::SHA as digest::core_api::CoreProxy>::Core: HashMarker
-        + UpdateCore
-        + FixedOutputCore
-        + BufferKindUser<BufferKind = Eager>
-        + Default
-        + Clone,
-    <<PBES2::SHA as digest::core_api::CoreProxy>::Core as BlockSizeUser>::BlockSize: IsLess<U256>,
-    Le<<<PBES2::SHA as digest::core_api::CoreProxy>::Core as BlockSizeUser>::BlockSize, U256>:
-        NonZero,
-    Hmac<PBES2::SHA>: KeyInit + Update + FixedOutput + Clone + Sync,
-    PBES2::AES: BlockSizeUser + BlockEncryptMut + BlockDecryptMut + KeyInit,
-{
-    type Key = OctetKey;
-    type Cek = OctetKey;
-    type AlgorithmHeader = PBES2_Header;
-    type WrapSettings = PBES2_Header;
-
-    fn wrap(
-        cek: Self::Cek,
-        key: &Self::Key,
-        settings: Self::WrapSettings,
-    ) -> Result<(Vec<u8>, Self::AlgorithmHeader), Error> {
-        let mut salt = Vec::with_capacity(PBES2::NAME.len() + 1 + settings.salt.len());
-        salt.extend_from_slice(PBES2::NAME);
-        salt.push(0);
-        salt.extend_from_slice(&settings.salt);
-
-        let mut dk: PBES2::Array = Default::default();
-        pbkdf2::pbkdf2::<Hmac<PBES2::SHA>>(&key.0, &salt, settings.count, &mut dk[..]);
-
-        let payload = &cek.0;
-        let len = next_multiple_of_8(payload.len());
-        let mut out = vec![0; len + 8];
-        out[8..][..payload.len()].copy_from_slice(payload);
-
-        aes_key_wrap(PBES2::AES::new_from_slice(&dk[..])?, &mut out);
-
-        Ok((out, settings))
-    }
-
-    fn unwrap(
-        encrypted_cek: &[u8],
-        key: &Self::Key,
-        settings: Self::AlgorithmHeader,
-    ) -> Result<Self::Cek, Error> {
-        let mut salt1 = b"PBES2-HS256+A128KW\0".to_vec();
-        salt1.extend_from_slice(&settings.salt);
-
-        let mut dk = [0; 16];
-        pbkdf2::pbkdf2::<Hmac<sha2::Sha256>>(&key.0, &salt1, settings.count, &mut dk);
-
-        let len = next_multiple_of_8(encrypted_cek.len());
-        let mut out = vec![0; len];
-        out[..encrypted_cek.len()].copy_from_slice(encrypted_cek);
-
-        aes_key_unwrap(Aes128::new_from_slice(&dk)?, &mut out)?;
-
-        out.rotate_left(8);
-        out.truncate(len - 8);
-
-        Ok(OctetKey(out))
-    }
-}
+pbes2!(sha2::Sha256, Aes128, "PBES2-HS256+A128KW", 128 / 8);
+pbes2!(sha2::Sha384, Aes192, "PBES2-HS384+A192KW", 192 / 8);
+pbes2!(sha2::Sha512, Aes256, "PBES2-HS512+A256KW", 256 / 8);
 
 fn next_multiple_of_8(x: usize) -> usize {
     (x + 7) & (!0b111)

@@ -19,9 +19,10 @@ use crate::jws::Secret;
 use ring::rand::SecureRandom;
 
 pub mod kma;
-mod cea {
-    pub mod aes_cbc_hmac_sha;
-}
+pub mod cea;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OctetKey(Vec<u8>);
 
 /// AES GCM Nonce length, in bytes
 const AES_GCM_NONCE_LENGTH: usize = 96 / 8;

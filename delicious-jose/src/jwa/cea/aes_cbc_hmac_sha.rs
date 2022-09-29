@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use aes::cipher::{BlockDecryptMut, BlockEncryptMut};
 use cipher::block_padding::Pkcs7;
 use hmac::Hmac;
@@ -5,11 +7,110 @@ use hmac::Hmac;
 use crate::{
     errors::Error,
     jwa::{
-        ContentEncryptionAlgorithm, EncryptionOptions, EncryptionResult,
+        ContentEncryptionAlgorithm, EncryptionOptions, EncryptionResult, OctetKey,
         AES_CBC_HMAC_SHA_ZEROED_NONCE,
     },
     jwk,
 };
+
+use super::CEA;
+
+/// [Content Encryption with AES_CBC_HMAC_SHA2](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2)
+pub struct AesCbcHmacSha2<Aes, Sha> {
+    _sha: PhantomData<Sha>,
+    _aes: PhantomData<Aes>,
+}
+
+#[allow(non_camel_case_types)]
+/// [Content Encryption with AES_128_CBC_HMAC_SHA_256](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2.3)
+pub type A128CBC_HS256 = AesCbcHmacSha2<aes::Aes128, sha2::Sha256>;
+#[allow(non_camel_case_types)]
+/// [Content Encryption with AES_192_CBC_HMAC_SHA_384](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2.4)
+pub type A192CBC_HS384 = AesCbcHmacSha2<aes::Aes192, sha2::Sha384>;
+#[allow(non_camel_case_types)]
+/// [Content Encryption with AES_256_CBC_HMAC_SHA_512](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2.5)
+pub type A256CBC_HS512 = AesCbcHmacSha2<aes::Aes256, sha2::Sha512>;
+
+macro_rules! aes_cbc {
+    ($sha:ty, $aes:ty, $name:literal, $key_len:expr) => {
+impl CEA for AesCbcHmacSha2<$aes, $sha> {
+    const ENC: &'static str = $name;
+
+    type Cek = OctetKey;
+
+    fn encrypt(
+        cek: Self::Cek,
+        payload: &[u8],
+        iv: Vec<u8>,
+        aad: Vec<u8>,
+    ) -> Result<EncryptionResult, Error> {
+        use aes::cipher::KeyIvInit;
+        use hmac::Mac;
+
+        if cek.0.len() != $key_len * 2 {
+            return Err(Error::UnspecifiedCryptographicError);
+        }
+
+        let (mac_key, enc_key) = cek.0.split_at($key_len);
+
+        // encrypt the payload using aes-cbc
+        let encrypted = cbc::Encryptor::<$aes>::new_from_slices(enc_key, &iv)?
+            .encrypt_padded_vec_mut::<Pkcs7>(payload);
+
+        // compute the hmac
+        let tag = Hmac::<$sha>::new_from_slice(mac_key)?
+            .chain_update(&aad)
+            .chain_update(&iv)
+            .chain_update(&encrypted)
+            .chain_update(&(aad.len() as u64 * 8).to_be_bytes())
+            .finalize()
+            .into_bytes()[..$key_len]
+            .to_vec();
+
+        Ok(EncryptionResult {
+            nonce: iv,
+            encrypted,
+            tag,
+            additional_data: aad,
+        })
+    }
+
+    fn decrypt(cek: Self::Cek, res: &EncryptionResult) -> Result<Vec<u8>, Error> {
+        use aes::cipher::KeyIvInit;
+        use hmac::Mac;
+
+        let EncryptionResult {
+            nonce,
+            encrypted,
+            tag,
+            additional_data: aad,
+        } = res;
+
+        if cek.0.len() != $key_len * 2 || tag.len() != $key_len {
+            return Err(Error::UnspecifiedCryptographicError);
+        }
+        let (mac_key, enc_key) = cek.0.split_at($key_len);
+
+        // validate the hmac
+        Hmac::<$sha>::new_from_slice(mac_key)?
+            .chain_update(&aad)
+            .chain_update(&nonce)
+            .chain_update(&encrypted)
+            .chain_update(&(aad.len() as u64 * 8).to_be_bytes())
+            .verify_truncated_left(&tag)?;
+
+        // decrypt the payload using aes-cbc
+        let decrypted = cbc::Decryptor::<$aes>::new_from_slices(enc_key, &nonce)?
+            .decrypt_padded_vec_mut::<Pkcs7>(&encrypted)?;
+        Ok(decrypted)
+    }
+} 
+    };
+}
+
+aes_cbc!(sha2::Sha256, aes::Aes128, "A128CBC-HS256", 128 / 8);
+aes_cbc!(sha2::Sha384, aes::Aes192, "A192CBC-HS384", 192 / 8);
+aes_cbc!(sha2::Sha512, aes::Aes256, "A256CBC-HS512", 256 / 8);
 
 impl ContentEncryptionAlgorithm {
     pub(crate) fn aes_cbc_encrypt(
@@ -19,25 +120,21 @@ impl ContentEncryptionAlgorithm {
         key: &jwk::Specified,
         options: &EncryptionOptions,
     ) -> Result<EncryptionResult, Error> {
-        use self::ContentEncryptionAlgorithm::{A128CBC_HS256, A192CBC_HS384, A256CBC_HS512};
-
-        let algorithm = match self {
-            A128CBC_HS256 => AES_CBC_HMAC_SHA::A128CBC_HS256,
-            A192CBC_HS384 => AES_CBC_HMAC_SHA::A192CBC_HS384,
-            A256CBC_HS512 => AES_CBC_HMAC_SHA::A256CBC_HS512,
-            _ => Err(Error::UnsupportedOperation)?,
-        };
-
-        let nonce = match *options {
-            EncryptionOptions::AES_CBC_HMAC_SHA { ref nonce } => Ok(nonce),
-            ref others => Err(unexpected_encryption_options_error!(
+        let iv = match *options {
+            EncryptionOptions::AES_CBC_HMAC_SHA { ref nonce } => nonce.to_vec(),
+            ref others => return Err(unexpected_encryption_options_error!(
                 AES_CBC_HMAC_SHA_ZEROED_NONCE,
                 others
             )),
-        }?;
-
-        let key = key.algorithm.octet_key()?;
-        aes_cbc_sha2_encrypt(algorithm, payload, nonce.as_slice(), aad, key)
+        };
+        let aad = aad.to_vec();
+        let cek = OctetKey(key.octet_key()?.to_vec());
+        match self {
+            ContentEncryptionAlgorithm::A128CBC_HS256 => A128CBC_HS256::encrypt(cek, payload, iv, aad),
+            ContentEncryptionAlgorithm::A192CBC_HS384 => A192CBC_HS384::encrypt(cek, payload, iv, aad),
+            ContentEncryptionAlgorithm::A256CBC_HS512 => A256CBC_HS512::encrypt(cek, payload, iv, aad),
+            _ => Err(Error::UnsupportedOperation),
+        }
     }
 
     pub(crate) fn aes_cbc_decrypt(
@@ -45,171 +142,14 @@ impl ContentEncryptionAlgorithm {
         encrypted: &EncryptionResult,
         key: &jwk::Specified,
     ) -> Result<Vec<u8>, Error> {
-        use self::ContentEncryptionAlgorithm::{A128CBC_HS256, A192CBC_HS384, A256CBC_HS512};
-
-        let algorithm = match self {
-            A128CBC_HS256 => AES_CBC_HMAC_SHA::A128CBC_HS256,
-            A192CBC_HS384 => AES_CBC_HMAC_SHA::A192CBC_HS384,
-            A256CBC_HS512 => AES_CBC_HMAC_SHA::A256CBC_HS512,
-            _ => Err(Error::UnsupportedOperation)?,
-        };
-        let key = key.algorithm.octet_key()?;
-        aes_cbc_sha2_decrypt(algorithm, encrypted, key)
-    }
-}
-
-#[derive(Copy, Clone)]
-#[allow(non_camel_case_types)]
-enum AES_CBC_HMAC_SHA {
-    /// aes cbc mode
-    A128CBC_HS256,
-    /// aes cbc mode
-    A192CBC_HS384,
-    /// aes cbc mode
-    A256CBC_HS512,
-}
-
-impl AES_CBC_HMAC_SHA {
-    fn key_len(self) -> usize {
+        let cek = OctetKey(key.octet_key()?.to_vec());
         match self {
-            Self::A128CBC_HS256 => 16,
-            Self::A192CBC_HS384 => 24,
-            Self::A256CBC_HS512 => 32,
+            ContentEncryptionAlgorithm::A128CBC_HS256 => A128CBC_HS256::decrypt(cek, encrypted),
+            ContentEncryptionAlgorithm::A192CBC_HS384 => A192CBC_HS384::decrypt(cek, encrypted),
+            ContentEncryptionAlgorithm::A256CBC_HS512 => A256CBC_HS512::decrypt(cek, encrypted),
+            _ => Err(Error::UnsupportedOperation),
         }
     }
-    fn hmac(self, key: &[u8], parts: [&[u8]; 4]) -> Result<Vec<u8>, ::digest::InvalidLength> {
-        use hmac::Mac;
-        let len = self.key_len();
-        Ok(match self {
-            Self::A128CBC_HS256 => {
-                let mut mac = Hmac::<sha2::Sha256>::new_from_slice(key)?;
-                parts.into_iter().for_each(|c| mac.update(c));
-                mac.finalize().into_bytes()[..len].to_vec()
-            }
-            Self::A192CBC_HS384 => {
-                let mut mac = Hmac::<sha2::Sha384>::new_from_slice(key)?;
-                parts.into_iter().for_each(|c| mac.update(c));
-                mac.finalize().into_bytes()[..len].to_vec()
-            }
-            Self::A256CBC_HS512 => {
-                let mut mac = Hmac::<sha2::Sha512>::new_from_slice(key)?;
-                parts.into_iter().for_each(|c| mac.update(c));
-                mac.finalize().into_bytes()[..len].to_vec()
-            }
-        })
-    }
-    fn hmac_validate(self, key: &[u8], parts: [&[u8]; 4], tag: &[u8]) -> Result<(), Error> {
-        use hmac::Mac;
-        match self {
-            Self::A128CBC_HS256 => {
-                let mut mac = Hmac::<sha2::Sha256>::new_from_slice(key)?;
-                parts.into_iter().for_each(|c| mac.update(c));
-                mac.verify_truncated_left(tag)?
-            }
-            Self::A192CBC_HS384 => {
-                let mut mac = Hmac::<sha2::Sha384>::new_from_slice(key)?;
-                parts.into_iter().for_each(|c| mac.update(c));
-                mac.verify_truncated_left(tag)?
-            }
-            Self::A256CBC_HS512 => {
-                let mut mac = Hmac::<sha2::Sha512>::new_from_slice(key)?;
-                parts.into_iter().for_each(|c| mac.update(c));
-                mac.verify_truncated_left(tag)?
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Encrypt a payload with AES GCM
-fn aes_cbc_sha2_encrypt(
-    alg: AES_CBC_HMAC_SHA,
-    payload: &[u8],
-    nonce: &[u8],
-    aad: &[u8],
-    key: &[u8],
-) -> Result<EncryptionResult, Error> {
-    use aes::cipher::KeyIvInit;
-    use AES_CBC_HMAC_SHA::{A128CBC_HS256, A192CBC_HS384, A256CBC_HS512};
-
-    let len = alg.key_len();
-    if key.len() != len * 2 {
-        return Err(Error::UnspecifiedCryptographicError);
-    }
-
-    let (mac_key, enc_key) = key.split_at(len);
-
-    // encrypt the payload using aes-cbc
-    let encrypted = match alg {
-        A128CBC_HS256 => cbc::Encryptor::<aes::Aes128>::new_from_slices(enc_key, nonce)?
-            .encrypt_padded_vec_mut::<Pkcs7>(payload),
-        A192CBC_HS384 => cbc::Encryptor::<aes::Aes192>::new_from_slices(enc_key, nonce)?
-            .encrypt_padded_vec_mut::<Pkcs7>(payload),
-        A256CBC_HS512 => cbc::Encryptor::<aes::Aes256>::new_from_slices(enc_key, nonce)?
-            .encrypt_padded_vec_mut::<Pkcs7>(payload),
-    };
-
-    // compute the hmac
-    let al = (aad.len() as u64 * 8).to_be_bytes();
-    let parts = [aad, nonce, encrypted.as_slice(), al.as_slice()];
-
-    let tag = alg.hmac(mac_key, parts)?;
-
-    Ok(EncryptionResult {
-        nonce: nonce.to_vec(),
-        encrypted,
-        tag,
-        additional_data: aad.to_vec(),
-    })
-}
-
-/// Decrypts a payload with AES GCM
-fn aes_cbc_sha2_decrypt(
-    alg: AES_CBC_HMAC_SHA,
-    encrypted: &EncryptionResult,
-    key: &[u8],
-) -> Result<Vec<u8>, Error> {
-    use aes::cipher::KeyIvInit;
-    use AES_CBC_HMAC_SHA::{A128CBC_HS256, A192CBC_HS384, A256CBC_HS512};
-
-    let EncryptionResult {
-        nonce,
-        encrypted,
-        tag,
-        additional_data: aad,
-    } = encrypted;
-
-    let len = match alg {
-        A128CBC_HS256 => 16,
-        A192CBC_HS384 => 24,
-        A256CBC_HS512 => 32,
-    };
-
-    if key.len() != len * 2 {
-        return Err(Error::UnspecifiedCryptographicError);
-    }
-    let (mac_key, enc_key) = key.split_at(len);
-
-    // compute the hmac
-    let al = (aad.len() as u64 * 8).to_be_bytes();
-    let parts = [
-        aad.as_slice(),
-        nonce.as_slice(),
-        encrypted.as_slice(),
-        al.as_slice(),
-    ];
-
-    alg.hmac_validate(mac_key, parts, tag)?;
-
-    let decrypted = match alg {
-        A128CBC_HS256 => cbc::Decryptor::<aes::Aes128>::new_from_slices(enc_key, nonce)?
-            .decrypt_padded_vec_mut::<Pkcs7>(encrypted)?,
-        A192CBC_HS384 => cbc::Decryptor::<aes::Aes192>::new_from_slices(enc_key, nonce)?
-            .decrypt_padded_vec_mut::<Pkcs7>(encrypted)?,
-        A256CBC_HS512 => cbc::Decryptor::<aes::Aes256>::new_from_slices(enc_key, nonce)?
-            .decrypt_padded_vec_mut::<Pkcs7>(encrypted)?,
-    };
-    Ok(decrypted)
 }
 
 #[cfg(test)]
@@ -218,7 +158,7 @@ mod tests {
     #[test]
     fn aescbc_hmacsha() {
         struct Test {
-            alg: AES_CBC_HMAC_SHA,
+            alg: ContentEncryptionAlgorithm,
             key: &'static [u8],
             enc: [u8; 144],
             tag: &'static [u8],
@@ -228,7 +168,7 @@ mod tests {
         // from https://datatracker.ietf.org/doc/html/rfc7518#appendix-B
         let tests = [
             Test {
-                alg: AES_CBC_HMAC_SHA::A128CBC_HS256,
+                alg: ContentEncryptionAlgorithm::A128CBC_HS256,
                 key: &hex!(
                     "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
                     "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"
@@ -247,7 +187,7 @@ mod tests {
                 tag: &hex!("65 2c 3f a3 6b 0a 7c 5b 32 19 fa b3 a3 0b c1 c4"),
             },
             Test {
-                alg: AES_CBC_HMAC_SHA::A192CBC_HS384,
+                alg: ContentEncryptionAlgorithm::A192CBC_HS384,
                 key: &hex!(
                     "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
                     "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"
@@ -270,7 +210,7 @@ mod tests {
                 ),
             },
             Test {
-                alg: AES_CBC_HMAC_SHA::A256CBC_HS512,
+                alg: ContentEncryptionAlgorithm::A256CBC_HS512,
                 key: &hex!(
                     "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
                     "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"
@@ -313,12 +253,14 @@ mod tests {
         );
 
         for test in tests {
-            let res = aes_cbc_sha2_encrypt(test.alg, &payload, &iv, &aad, test.key).unwrap();
+            let key = jwk::Specified::new_octet_key(test.key);
+            let opts = EncryptionOptions::AES_CBC_HMAC_SHA { nonce: iv.to_vec() };
+            let res = test.alg.aes_cbc_encrypt(&payload, &aad, &key, &opts).unwrap();
 
             assert_eq!(res.encrypted, test.enc);
             assert_eq!(res.tag, test.tag);
 
-            let res = aes_cbc_sha2_decrypt(test.alg, &res, test.key).unwrap();
+            let res = test.alg.aes_cbc_decrypt(&res, &key).unwrap();
 
             assert_eq!(res, payload);
         }

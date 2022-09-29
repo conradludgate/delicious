@@ -212,6 +212,8 @@ impl Algorithm {
 }
 
 pub trait KMA {
+    const ALG: &'static str;
+
     /// Key used to derive the Cek
     type Key;
     /// Content Encryption Key
@@ -233,8 +235,6 @@ pub trait KMA {
     ) -> Result<Self::Cek, Error>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OctetKey(Vec<u8>);
 
 #[cfg(test)]
 mod tests {
