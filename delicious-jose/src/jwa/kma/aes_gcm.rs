@@ -21,6 +21,10 @@ pub enum AES_GCM {
 }
 
 /// [Key Encryption with AES GCM](https://datatracker.ietf.org/doc/html/rfc7518#section-4.7)
+///
+/// See
+/// * [`A128GCMKW`] - Key wrapping with AES GCM using 128-bit key
+/// * [`A256GCMKW`] - Key wrapping with AES GCM using 256-bit key
 pub struct AesGcmKw<AES>(PhantomData<AES>);
 
 #[allow(non_camel_case_types)]
@@ -39,8 +43,8 @@ pub struct AES_GCM_Header {
 use crate::jwa::cea::AesGcm;
 
 macro_rules! aes_gcm {
-    ($aes:ty, $name:literal) => {
-        impl KMA for AesGcmKw<$aes> {
+    ($id:ident, $aes:ty, $name:literal) => {
+        impl KMA for $id {
             const ALG: &'static str = $name;
             type Key = OctetKey;
             type Cek = OctetKey;
@@ -78,8 +82,8 @@ macro_rules! aes_gcm {
     };
 }
 
-aes_gcm!(aes_gcm::Aes128Gcm, "A128GCMKW");
-aes_gcm!(aes_gcm::Aes256Gcm, "A256GCMKW");
+aes_gcm!(A128GCMKW, aes_gcm::Aes128Gcm, "A128GCMKW");
+aes_gcm!(A256GCMKW, aes_gcm::Aes256Gcm, "A256GCMKW");
 
 // fn from_slice<Size: ArrayLength<u8>>(x: &[u8]) -> Result<&GenericArray<u8, Size>, Error> {
 //     if x.len() != Size::to_usize() {

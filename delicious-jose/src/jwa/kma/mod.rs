@@ -11,7 +11,7 @@ mod pbes2_aes_kw;
 
 pub use self::aes_gcm::{AES_GCM_Header, AesGcmKw, A128GCMKW, A256GCMKW, AES_GCM};
 pub use pbes2_aes_kw::{
-    PBES2Alg, PBES2_Header, PBES2, PBES2_HS256_A128KW, PBES2_HS384_A192KW, PBES2_HS512_A256KW,
+    PBES2_Header, Pbes2, PBES2, PBES2_HS256_A128KW, PBES2_HS384_A192KW, PBES2_HS512_A256KW,
 };
 
 /// Algorithms for key management as defined in [RFC7518#4](https://tools.ietf.org/html/rfc7518#section-4)
@@ -213,7 +213,9 @@ impl Algorithm {
     }
 }
 
+/// [Cryptographic Algorithms for Key Management](https://www.rfc-editor.org/rfc/rfc7518#section-4)
 pub trait KMA {
+    /// The name specified in the `alg` header.
     const ALG: &'static str;
 
     /// Key used to derive the Cek
@@ -225,11 +227,14 @@ pub trait KMA {
     /// Settings used to wrap the key
     type WrapSettings;
 
+    /// Wraps the content encryption key
     fn wrap(
         cek: Self::Cek,
         key: &Self::Key,
         settings: Self::WrapSettings,
     ) -> Result<(Vec<u8>, Self::AlgorithmHeader), Error>;
+
+    /// unwraps the content encryption key
     fn unwrap(
         encrypted_cek: &[u8],
         key: &Self::Key,

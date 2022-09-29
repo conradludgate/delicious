@@ -16,6 +16,11 @@ use crate::{
 use super::CEA;
 
 /// [Content Encryption with AES_CBC_HMAC_SHA2](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2)
+///
+/// See
+/// * [`A128CBC_HS256`] - Content Encryption with AES_128_CBC_HMAC_SHA_256
+/// * [`A192CBC_HS384`] - Content Encryption with AES_192_CBC_HMAC_SHA_384
+/// * [`A256CBC_HS512`] - Content Encryption with AES_256_CBC_HMAC_SHA_512
 pub struct AesCbcHmacSha2<Aes, Sha> {
     _sha: PhantomData<Sha>,
     _aes: PhantomData<Aes>,
@@ -32,8 +37,8 @@ pub type A192CBC_HS384 = AesCbcHmacSha2<aes::Aes192, sha2::Sha384>;
 pub type A256CBC_HS512 = AesCbcHmacSha2<aes::Aes256, sha2::Sha512>;
 
 macro_rules! aes_cbc {
-    ($sha:ty, $aes:ty, $name:literal, $key_len:expr) => {
-        impl CEA for AesCbcHmacSha2<$aes, $sha> {
+    ($id:ident, $sha:ty, $aes:ty, $name:literal, $key_len:expr) => {
+        impl CEA for $id {
             const ENC: &'static str = $name;
 
             type Cek = OctetKey;
@@ -108,9 +113,27 @@ macro_rules! aes_cbc {
     };
 }
 
-aes_cbc!(sha2::Sha256, aes::Aes128, "A128CBC-HS256", 128 / 8);
-aes_cbc!(sha2::Sha384, aes::Aes192, "A192CBC-HS384", 192 / 8);
-aes_cbc!(sha2::Sha512, aes::Aes256, "A256CBC-HS512", 256 / 8);
+aes_cbc!(
+    A128CBC_HS256,
+    sha2::Sha256,
+    aes::Aes128,
+    "A128CBC-HS256",
+    128 / 8
+);
+aes_cbc!(
+    A192CBC_HS384,
+    sha2::Sha384,
+    aes::Aes192,
+    "A192CBC-HS384",
+    192 / 8
+);
+aes_cbc!(
+    A256CBC_HS512,
+    sha2::Sha512,
+    aes::Aes256,
+    "A256CBC-HS512",
+    256 / 8
+);
 
 impl ContentEncryptionAlgorithm {
     pub(crate) fn aes_cbc_encrypt(

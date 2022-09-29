@@ -12,18 +12,22 @@ use crate::{
 };
 
 /// [Content Encryption with AES GCM](https://datatracker.ietf.org/doc/html/rfc7518#section-5.3)
+///
+/// See
+/// * [`A128GCM`] - AES GCM using 128-bit key
+/// * [`A256GCM`] - AES GCM using 256-bit key
 pub struct AesGcm<Aes>(PhantomData<Aes>);
 
 #[allow(non_camel_case_types)]
-/// AES GCM using 128-bit key
+/// [Content Encryption with AES GCM using 128-bit key](https://datatracker.ietf.org/doc/html/rfc7518#section-5.3)
 pub type A128GCM = AesGcm<aes_gcm::Aes128Gcm>;
 #[allow(non_camel_case_types)]
-// AES GCM using 256-bit key
+/// [Content Encryption with AES GCM using 256-bit key](https://datatracker.ietf.org/doc/html/rfc7518#section-5.3)
 pub type A256GCM = AesGcm<aes_gcm::Aes256Gcm>;
 
 macro_rules! aes_gcm {
-    ($aes:ty, $name:literal, $key_len:expr) => {
-        impl AesGcm<$aes> {
+    ($id:ident, $aes:ty, $name:literal, $key_len:expr) => {
+        impl $id {
             pub(crate) fn encrypt_inner(
                 cek: &[u8],
                 mut payload: Vec<u8>,
@@ -62,9 +66,8 @@ macro_rules! aes_gcm {
             }
         }
 
-        impl CEA for AesGcm<$aes> {
+        impl CEA for $id {
             const ENC: &'static str = $name;
-
             type Cek = OctetKey;
 
             fn encrypt(
@@ -89,8 +92,8 @@ macro_rules! aes_gcm {
     };
 }
 
-aes_gcm!(aes_gcm::Aes128Gcm, "A128GCM", 128 / 8);
-aes_gcm!(aes_gcm::Aes256Gcm, "A256GCM", 256 / 8);
+aes_gcm!(A128GCM, aes_gcm::Aes128Gcm, "A128GCM", 128 / 8);
+aes_gcm!(A256GCM, aes_gcm::Aes256Gcm, "A256GCM", 256 / 8);
 
 fn from_slice<Size: ArrayLength<u8>>(x: &[u8]) -> Result<&GenericArray<u8, Size>, Error> {
     if x.len() != Size::to_usize() {

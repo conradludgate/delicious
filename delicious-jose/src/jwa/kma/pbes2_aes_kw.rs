@@ -166,8 +166,8 @@ pub struct PBES2_Header {
 }
 
 macro_rules! pbes2 {
-    ($sha:ty, $aes:ty, $name:literal, $key_len:expr) => {
-        impl KMA for PBES2Alg<$sha, $aes> {
+    ($id:ident, $sha:ty, $aes:ty, $name:literal, $key_len:expr) => {
+        impl KMA for $id {
             const ALG: &'static str = $name;
             type Key = OctetKey;
             type Cek = OctetKey;
@@ -226,25 +226,48 @@ macro_rules! pbes2 {
 }
 
 #[allow(non_camel_case_types)]
-/// Generic PBES2 key management algorithm
-pub struct PBES2Alg<Sha, Aes> {
+/// [Key Encryption with PBES2](https://datatracker.ietf.org/doc/html/rfc7518#section-4.8)
+///
+/// See
+/// * [`PBES2_HS256_A128KW`] - PBES2 key management algorithm using SHA256 and AES128
+/// * [`PBES2_HS384_A192KW`] - PBES2 key management algorithm using SHA384 and AES192
+/// * [`PBES2_HS512_A256KW`] - PBES2 key management algorithm using SHA512 and AES256
+pub struct Pbes2<Sha, Aes> {
     _sha: PhantomData<Sha>,
     _aes: PhantomData<Aes>,
 }
 
 #[allow(non_camel_case_types)]
 /// PBES2 key management algorithm using SHA256 and AES128
-pub type PBES2_HS256_A128KW = PBES2Alg<sha2::Sha256, Aes128>;
+pub type PBES2_HS256_A128KW = Pbes2<sha2::Sha256, Aes128>;
 #[allow(non_camel_case_types)]
 /// PBES2 key management algorithm using SHA384 and AES192
-pub type PBES2_HS384_A192KW = PBES2Alg<sha2::Sha384, Aes192>;
+pub type PBES2_HS384_A192KW = Pbes2<sha2::Sha384, Aes192>;
 #[allow(non_camel_case_types)]
 /// PBES2 key management algorithm using SHA512 and AES256
-pub type PBES2_HS512_A256KW = PBES2Alg<sha2::Sha512, Aes256>;
+pub type PBES2_HS512_A256KW = Pbes2<sha2::Sha512, Aes256>;
 
-pbes2!(sha2::Sha256, Aes128, "PBES2-HS256+A128KW", 128 / 8);
-pbes2!(sha2::Sha384, Aes192, "PBES2-HS384+A192KW", 192 / 8);
-pbes2!(sha2::Sha512, Aes256, "PBES2-HS512+A256KW", 256 / 8);
+pbes2!(
+    PBES2_HS256_A128KW,
+    sha2::Sha256,
+    Aes128,
+    "PBES2-HS256+A128KW",
+    128 / 8
+);
+pbes2!(
+    PBES2_HS384_A192KW,
+    sha2::Sha384,
+    Aes192,
+    "PBES2-HS384+A192KW",
+    192 / 8
+);
+pbes2!(
+    PBES2_HS512_A256KW,
+    sha2::Sha512,
+    Aes256,
+    "PBES2-HS512+A256KW",
+    256 / 8
+);
 
 fn next_multiple_of_8(x: usize) -> usize {
     (x + 7) & (!0b111)
