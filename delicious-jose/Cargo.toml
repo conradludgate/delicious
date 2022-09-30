@@ -34,6 +34,12 @@ pbkdf2 = "0.11.0"
 aead = "0.5.1"
 aes-gcm = "0.10.1"
 rand = "0.8.5"
+p256 = "0.11.1"
+p384 = "0.11.2"
+ecdsa = "0.14.8"
+signature = "1.6.3"
+elliptic-curve = "0.12.3"
+sec1 = "0.3.0"
 
 [dev-dependencies]
 serde_test = "1.0"

@@ -366,6 +366,52 @@ pub struct EllipticCurveKeyParameters {
     pub d: Option<Vec<u8>>,
 }
 
+impl EllipticCurveKeyParameters {
+    pub(crate) fn read_pub_sec1_bytes(&self, output: &mut [u8]) -> Result<(), Error> {
+        let n = match self.curve {
+            EllipticCurve::P256 => 256/8,
+            EllipticCurve::P384 => 384/8,
+            EllipticCurve::P521 => unimplemented!(),
+            EllipticCurve::Curve25519 => unimplemented!(),
+            EllipticCurve::Curve448 => unimplemented!(),
+        };
+        if output.len() != n * 2 + 1 {
+            return Err(Error::UnspecifiedCryptographicError);
+        }
+        if self.x.len() + self.y.len() != n * 2 {
+            return Err(Error::UnspecifiedCryptographicError);
+        }
+        let (head, tail) = output.split_at_mut(1);
+        let (x, y) = tail.split_at_mut(n);
+
+        head[0] = 4; // uncompressed
+        x.copy_from_slice(&self.x);
+        y.copy_from_slice(&self.y);
+        Ok(())
+    }
+    pub(crate) fn read_priv_bytes(&self, output: &mut [u8]) -> Result<(), Error> {
+        let n = match self.curve {
+            EllipticCurve::P256 => 256/8,
+            EllipticCurve::P384 => 384/8,
+            EllipticCurve::P521 => unimplemented!(),
+            EllipticCurve::Curve25519 => unimplemented!(),
+            EllipticCurve::Curve448 => unimplemented!(),
+        };
+        if output.len() != n {
+            return Err(Error::UnspecifiedCryptographicError);
+        }
+        let d = self
+            .d
+            .as_deref()
+            .ok_or(Error::UnspecifiedCryptographicError)?;
+        if d.len() != n {
+            return Err(Error::UnspecifiedCryptographicError);
+        }
+        output.copy_from_slice(d);
+        Ok(())
+    }
+}
+
 /// Parameters for a RSA Key
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Default)]
 pub struct RSAKeyParameters {

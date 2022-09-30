@@ -1,3 +1,5 @@
+//! [Cryptographic Algorithms for Digital Signatures and MACs](https://www.rfc-editor.org/rfc/rfc7518#section-3)
+
 use ring::constant_time::verify_slices_are_equal;
 use ring::signature::KeyPair;
 use ring::{hmac, signature};
@@ -5,6 +7,35 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::Error;
 use crate::jws::Secret;
+
+mod ecdsa;
+mod hmac_sha2;
+pub use self::ecdsa::{Ecdsa, ES256, ES384};
+pub use hmac_sha2::{HmacSha, HS256, HS384, HS512};
+
+pub trait Sign {
+    const ALG: Algorithm;
+    type Key;
+    fn sign(key: &Self::Key, data: &[u8]) -> Result<Vec<u8>, Error>;
+    fn verify(key: &Self::Key, data: &[u8], signature: &[u8]) -> Result<(), Error>;
+}
+
+pub struct None;
+
+impl Sign for None {
+    const ALG: Algorithm = Algorithm::None;
+    type Key = ();
+    fn sign(_key: &Self::Key, _data: &[u8]) -> Result<Vec<u8>, Error> {
+        Ok(vec![])
+    }
+    fn verify(_key: &Self::Key, _data: &[u8], signature: &[u8]) -> Result<(), Error> {
+        if signature.is_empty() {
+            Ok(())
+        } else {
+            Err(Error::UnspecifiedCryptographicError)
+        }
+    }
+}
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
 /// The algorithms supported for digital signature and MACs, defined by
@@ -51,6 +82,24 @@ impl Default for Algorithm {
 }
 
 impl Algorithm {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Algorithm::None => "none",
+            Algorithm::HS256 => "HS256",
+            Algorithm::HS384 => "HS384",
+            Algorithm::HS512 => "HS512",
+            Algorithm::RS256 => "RS256",
+            Algorithm::RS384 => "RS384",
+            Algorithm::RS512 => "RS512",
+            Algorithm::ES256 => "ES256",
+            Algorithm::ES384 => "ES384",
+            Algorithm::ES512 => "ES512",
+            Algorithm::PS256 => "PS256",
+            Algorithm::PS384 => "PS384",
+            Algorithm::PS512 => "PS512",
+        }
+    }
+
     /// Take some bytes and sign it according to the algorithm and secret provided.
     pub fn sign(self, data: &[u8], secret: &Secret) -> Result<Vec<u8>, Error> {
         use self::Algorithm::*;
@@ -270,32 +319,6 @@ mod tests {
                 vec![].as_slice(),
                 "payload".to_string().as_bytes(),
                 &Secret::None,
-            )
-            .unwrap();
-    }
-
-    #[test]
-    fn sign_and_verify_hs256() {
-        let expected_base64 = "uC_LeRrOxXhZuYm0MKgmSIzi5Hn9-SMmvQoug3WkK6Q";
-        let expected_bytes: Vec<u8> =
-            base64::decode_config(&expected_base64, base64::URL_SAFE_NO_PAD).unwrap();
-
-        let actual_signature = Algorithm::HS256
-            .sign(
-                "payload".to_string().as_bytes(),
-                &Secret::bytes_from_str("secret"),
-            )
-            .unwrap();
-        assert_eq!(
-            &*base64::encode_config(actual_signature, base64::URL_SAFE_NO_PAD),
-            expected_base64
-        );
-
-        Algorithm::HS256
-            .verify(
-                expected_bytes.as_slice(),
-                "payload".to_string().as_bytes(),
-                &Secret::bytes_from_str("secret"),
             )
             .unwrap();
     }

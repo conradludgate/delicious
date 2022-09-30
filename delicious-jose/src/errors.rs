@@ -139,6 +139,21 @@ impl From<cipher::block_padding::UnpadError> for Error {
         Error::UnspecifiedCryptographicError
     }
 }
+impl From<sec1::Error> for Error {
+    fn from(_: sec1::Error) -> Self {
+        Error::UnspecifiedCryptographicError
+    }
+}
+impl From<elliptic_curve::Error> for Error {
+    fn from(_: elliptic_curve::Error) -> Self {
+        Error::UnspecifiedCryptographicError
+    }
+}
+impl From<signature::Error> for Error {
+    fn from(_: signature::Error) -> Self {
+        Error::UnspecifiedCryptographicError
+    }
+}
 
 impl From<string::FromUtf8Error> for Error {
     fn from(e: string::FromUtf8Error) -> Self {

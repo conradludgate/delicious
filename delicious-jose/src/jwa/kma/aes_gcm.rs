@@ -1,10 +1,7 @@
-use std::marker::PhantomData;
-
-use serde::{Deserialize, Serialize};
-
-use crate::{errors::Error, jwk::OctetKey};
-
 use super::KMA;
+pub use crate::jwa::cea::AesGcm;
+use crate::{errors::Error, jwk::OctetKey};
+use serde::{Deserialize, Serialize};
 
 /// Key wrapping with AES GCM. [RFC7518#4.7](https://tools.ietf.org/html/rfc7518#section-4.7)
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -19,36 +16,15 @@ pub enum AES_GCM {
     A256,
 }
 
-/// [Key Encryption with AES GCM](https://datatracker.ietf.org/doc/html/rfc7518#section-4.7)
-///
-/// See
-/// * [`A128GCMKW`] - Key wrapping with AES GCM using 128-bit key
-/// * [`A256GCMKW`] - Key wrapping with AES GCM using 256-bit key
-#[derive(Clone, Copy)]
-pub struct AesGcmKw<AES>(PhantomData<AES>);
-
-impl<Aes> PartialEq for AesGcmKw<Aes> {
-    fn eq(&self, _other: &Self) -> bool {
-        true
-    }
-}
-impl<Aes> Eq for AesGcmKw<Aes> {}
-
-impl<Aes> std::fmt::Debug for AesGcmKw<Aes>
-where
-    Self: KMA,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(Self::ALG.as_str())
-    }
-}
-
 #[allow(non_camel_case_types)]
 /// Key wrapping with AES GCM using 128-bit key
-pub type A128GCMKW = AesGcmKw<aes_gcm::Aes128Gcm>;
+pub type A128GCMKW = AesGcm<aes::Aes128>;
+#[allow(non_camel_case_types)]
+/// Key wrapping with AES GCM using 192-bit key
+pub type A192GCMKW = AesGcm<aes::Aes192>;
 #[allow(non_camel_case_types)]
 /// Key wrapping with AES GCM using 256-bit key
-pub type A256GCMKW = AesGcmKw<aes_gcm::Aes256Gcm>;
+pub type A256GCMKW = AesGcm<aes::Aes256>;
 
 /// Header for AES GCM Keywrap algorithm.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -59,8 +35,6 @@ pub struct AesGcmKwHeader {
     /// The authentication tag resulting from the encryption
     pub tag: Vec<u8>,
 }
-
-use crate::jwa::cea::AesGcm;
 
 macro_rules! aes_gcm {
     ($id:ident, $aes:ty, $name:ident) => {
@@ -76,8 +50,7 @@ macro_rules! aes_gcm {
                 key: &Self::Key,
                 settings: Self::WrapSettings,
             ) -> Result<(Vec<u8>, Self::Header), Error> {
-                let res =
-                    AesGcm::<$aes>::encrypt_inner(&key.value, &cek.value, settings, Vec::new())?;
+                let res = Self::encrypt_inner(&key.value, &cek.value, settings, Vec::new())?;
                 let header = AesGcmKwHeader {
                     nonce: res.nonce,
                     tag: res.tag,
@@ -90,7 +63,7 @@ macro_rules! aes_gcm {
                 key: &Self::Key,
                 header: Self::Header,
             ) -> Result<Self::Cek, Error> {
-                let res = AesGcm::<$aes>::decrypt_inner(
+                let res = Self::decrypt_inner(
                     &key.value,
                     encrypted_cek,
                     &header.nonce,
@@ -103,8 +76,9 @@ macro_rules! aes_gcm {
     };
 }
 
-aes_gcm!(A128GCMKW, aes_gcm::Aes128Gcm, A128);
-aes_gcm!(A256GCMKW, aes_gcm::Aes256Gcm, A256);
+aes_gcm!(A128GCMKW, aes::Aes128, A128);
+aes_gcm!(A192GCMKW, aes::Aes192, A192);
+aes_gcm!(A256GCMKW, aes::Aes256, A256);
 
 impl From<AES_GCM> for super::Algorithm {
     fn from(a: AES_GCM) -> Self {
@@ -124,24 +98,32 @@ mod tests {
     #[test]
     fn aes128gcmkw_key_encryption_round_trip() {
         let key = OctetKey::new(random_vec(128 / 8));
-        let cek = OctetKey::new(random_vec(128 / 8));
-        let nonce = random_aes_gcm_nonce();
+        kma_round_trip::<A128GCMKW>(&key);
+    }
 
-        let (encrypted_cek, settings) = A128GCMKW::wrap(&cek, &key, nonce).unwrap();
-        let decrypted_cek = A128GCMKW::unwrap(&encrypted_cek, &key, settings).unwrap();
-
-        assert_eq!(cek, decrypted_cek);
+    #[test]
+    fn aes192gcmkw_key_encryption_round_trip() {
+        let key = OctetKey::new(random_vec(192 / 8));
+        kma_round_trip::<A192GCMKW>(&key);
     }
 
     #[test]
     fn aes256gcmkw_key_encryption_round_trip() {
         let key = OctetKey::new(random_vec(256 / 8));
+        kma_round_trip::<A256GCMKW>(&key);
+    }
+
+    fn kma_round_trip<K>(key: &K::Key)
+    where
+        K: KMA<Cek = OctetKey, WrapSettings = Vec<u8>>,
+    {
         let cek = OctetKey::new(random_vec(128 / 8));
         let nonce = random_aes_gcm_nonce();
 
-        let (encrypted_cek, settings) = A256GCMKW::wrap(&cek, &key, nonce).unwrap();
-        let decrypted_cek = A256GCMKW::unwrap(&encrypted_cek, &key, settings).unwrap();
+        let (encrypted_cek, settings) = K::wrap(&cek, key, nonce).unwrap();
+        let decrypted_cek = K::unwrap(&encrypted_cek, key, settings).unwrap();
 
+        assert_ne!(cek.as_bytes(), encrypted_cek);
         assert_eq!(cek, decrypted_cek);
     }
 }

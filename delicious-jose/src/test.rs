@@ -26,3 +26,7 @@ pub fn random_vec(len: usize) -> Vec<u8> {
     rand::thread_rng().fill_bytes(&mut nonce);
     nonce
 }
+
+pub fn fromb64(s: &str) -> Vec<u8> {
+    base64::decode_config(s, base64::URL_SAFE_NO_PAD).unwrap()
+}

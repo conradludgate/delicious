@@ -10,21 +10,48 @@ use crate::{jwk::OctetKey, Error};
 
 /// [Content Encryption with AES GCM](https://datatracker.ietf.org/doc/html/rfc7518#section-5.3)
 ///
-/// See
+/// See:
 /// * [`A128GCM`] - AES GCM using 128-bit key
+/// * [`A192GCM`] - AES GCM using 192-bit key
 /// * [`A256GCM`] - AES GCM using 256-bit key
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+/// 
+/// Alternatively, used as [Key Encryption with AES GCM](https://datatracker.ietf.org/doc/html/rfc7518#section-4.7)
+///
+/// See:
+/// * [`A128GCMKW`](crate::jwa::kma::A128GCMKW) - Key wrapping with AES GCM using 128-bit key
+/// * [`A192GCMKW`](crate::jwa::kma::A192GCMKW) - Key wrapping with AES GCM using 192-bit key
+/// * [`A256GCMKW`](crate::jwa::kma::A256GCMKW) - Key wrapping with AES GCM using 256-bit key
+#[derive(Clone, Copy)]
 pub struct AesGcm<Aes>(PhantomData<Aes>);
+
+impl<Aes> PartialEq for AesGcm<Aes> {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+impl<Aes> Eq for AesGcm<Aes> {}
+
+impl<Aes> std::fmt::Debug for AesGcm<Aes>
+where
+    Self: CEA,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(Self::ENC.as_str())
+    }
+}
 
 #[allow(non_camel_case_types)]
 /// [Content Encryption with AES GCM using 128-bit key](https://datatracker.ietf.org/doc/html/rfc7518#section-5.3)
-pub type A128GCM = AesGcm<aes_gcm::Aes128Gcm>;
+pub type A128GCM = AesGcm<aes::Aes128>;
+#[allow(non_camel_case_types)]
+/// [Content Encryption with AES GCM using 192-bit key](https://datatracker.ietf.org/doc/html/rfc7518#section-5.3)
+pub type A192GCM = AesGcm<aes::Aes192>;
 #[allow(non_camel_case_types)]
 /// [Content Encryption with AES GCM using 256-bit key](https://datatracker.ietf.org/doc/html/rfc7518#section-5.3)
-pub type A256GCM = AesGcm<aes_gcm::Aes256Gcm>;
+pub type A256GCM = AesGcm<aes::Aes256>;
 
 macro_rules! aes_gcm {
-    ($id:ident, $aes:ty, $name:ident, $key_len:expr) => {
+    ($id:ident, $aes:ty, $key_len:expr) => {
         impl $id {
             pub(crate) fn encrypt_inner(
                 cek: &[u8],
@@ -32,8 +59,9 @@ macro_rules! aes_gcm {
                 iv: Vec<u8>,
                 aad: Vec<u8>,
             ) -> Result<EncryptionResult, Error> {
-                let cipher = <$aes>::new_from_slice(&cek)?;
-                let nonce: &aes_gcm::Nonce<_> = from_slice(&iv)?;
+                let cipher =
+                    ::aes_gcm::AesGcm::<$aes, aes::cipher::consts::U12>::new_from_slice(&cek)?;
+                let nonce: &::aes_gcm::Nonce<_> = from_slice(&iv)?;
                 let mut payload = payload.to_vec();
                 let tag = cipher
                     .encrypt_in_place_detached(nonce, &aad, &mut payload)
@@ -54,9 +82,10 @@ macro_rules! aes_gcm {
                 tag: &[u8],
                 aad: &[u8],
             ) -> Result<Vec<u8>, Error> {
-                let cipher = <$aes>::new_from_slice(&cek)?;
-                let nonce: &aes_gcm::Nonce<_> = from_slice(&nonce)?;
-                let tag: &aes_gcm::Tag = from_slice(&tag)?;
+                let cipher =
+                    ::aes_gcm::AesGcm::<$aes, aes::cipher::consts::U12>::new_from_slice(&cek)?;
+                let nonce: &::aes_gcm::Nonce<_> = from_slice(&nonce)?;
+                let tag: &::aes_gcm::Tag = from_slice(&tag)?;
                 let mut in_out: Vec<u8> = encrypted.to_vec();
                 cipher
                     .decrypt_in_place_detached(nonce, &aad, &mut in_out, tag)
@@ -66,7 +95,7 @@ macro_rules! aes_gcm {
         }
 
         impl CEA for $id {
-            const ENC: super::Algorithm = super::Algorithm::$name;
+            const ENC: super::Algorithm = super::Algorithm::$id;
             type Cek = OctetKey;
             const IV: usize = 96 / 8;
 
@@ -99,8 +128,9 @@ macro_rules! aes_gcm {
     };
 }
 
-aes_gcm!(A128GCM, aes_gcm::Aes128Gcm, A128GCM, 128 / 8);
-aes_gcm!(A256GCM, aes_gcm::Aes256Gcm, A256GCM, 256 / 8);
+aes_gcm!(A128GCM, aes::Aes128, 128 / 8);
+aes_gcm!(A192GCM, aes::Aes192, 192 / 8);
+aes_gcm!(A256GCM, aes::Aes256, 256 / 8);
 
 fn from_slice<Size: ArrayLength<u8>>(x: &[u8]) -> Result<&GenericArray<u8, Size>, Error> {
     if x.len() != Size::to_usize() {
@@ -120,6 +150,12 @@ mod tests {
     #[test]
     fn aes128gcm_key_length() {
         assert_eq!(A128GCM::generate_cek().as_bytes().len(), 128 / 8);
+    }
+
+    /// `ContentEncryptionAlgorithm::A192GCM` generates CEK of the right length
+    #[test]
+    fn aes192gcm_key_length() {
+        assert_eq!(A192GCM::generate_cek().as_bytes().len(), 192 / 8);
     }
 
     /// `ContentEncryptionAlgorithm::A256GCM` generates CEK of the right length
@@ -148,6 +184,21 @@ mod tests {
     }
 
     #[test]
+    fn aes_gcm_192_encryption_round_trip_fixed_key_nonce() {
+        let payload = "这个世界值得我们奋战！";
+        let key = OctetKey::new(vec![0; 192 / 8]);
+        cea_round_trip::<A192GCM>(&key, payload.as_bytes(), vec![0; 12], nonce());
+    }
+
+    #[test]
+    fn aes_gcm_192_encryption_round_trip() {
+        let payload = "这个世界值得我们奋战！";
+        let key = OctetKey::new(random_vec(192 / 8));
+
+        cea_round_trip::<A192GCM>(&key, payload.as_bytes(), vec![0; 12], nonce());
+    }
+
+    #[test]
     fn aes_gcm_256_encryption_round_trip_fixed_key_nonce() {
         let payload = "这个世界值得我们奋战！";
         let key = OctetKey::new(vec![0; 256 / 8]);
@@ -169,6 +220,7 @@ mod tests {
     {
         let res = C::encrypt(key, payload, iv, aad).unwrap();
         let output = C::decrypt(key, &res).unwrap();
+        assert_ne!(res.encrypted, payload);
         assert_eq!(output, payload);
     }
 }

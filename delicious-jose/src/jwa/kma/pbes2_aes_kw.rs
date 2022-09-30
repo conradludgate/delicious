@@ -509,7 +509,7 @@ mod tests {
         settings: K::WrapSettings,
         expected: &[u8],
     ) where
-        K::Cek: Clone + PartialEq + std::fmt::Debug,
+        K::Cek: PartialEq + std::fmt::Debug,
     {
         let (encrypted_cek, header) = K::wrap(&payload, key, settings).unwrap();
 

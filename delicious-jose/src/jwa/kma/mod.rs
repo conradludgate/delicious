@@ -7,7 +7,7 @@ use crate::{errors::Error, jwk::OctetKey};
 pub(crate) mod aes_gcm;
 mod pbes2_aes_kw;
 
-pub use self::aes_gcm::{AesGcmKw, AesGcmKwHeader, A128GCMKW, A256GCMKW, AES_GCM};
+pub use self::aes_gcm::{AesGcmKwHeader, A128GCMKW, A192GCMKW, A256GCMKW, AES_GCM};
 pub use pbes2_aes_kw::{
     Pbes2, Pbes2Header, PBES2, PBES2_HS256_A128KW, PBES2_HS384_A192KW, PBES2_HS512_A256KW,
 };
