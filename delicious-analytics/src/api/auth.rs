@@ -6,7 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
     TypedHeader,
 };
-use delicious_jose::{
+use no_way::{
     jwa::{cea, kma, sign},
     jwe::Encrypted,
     JWT,

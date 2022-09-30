@@ -14,7 +14,7 @@ use super::KMA;
 /// PBES2 with HMAC SHA and AES key-wrapping. [RFC7518#4.8](https://tools.ietf.org/html/rfc7518#section-4.8)
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 #[allow(non_camel_case_types)]
-pub enum PBES2 {
+pub enum Pbes2Algorithm {
     /// PBES2 with HMAC SHA-256 and "A128KW" wrapping
     HS256_A128KW,
     /// PBES2 with HMAC SHA-384 and "A192KW" wrapping
@@ -23,13 +23,13 @@ pub enum PBES2 {
     HS512_A256KW,
 }
 
-impl From<PBES2> for super::Algorithm {
-    fn from(p: PBES2) -> Self {
-        super::Algorithm::PBES2(p)
+impl From<Pbes2Algorithm> for super::Algorithm {
+    fn from(p: Pbes2Algorithm) -> Self {
+        super::Algorithm::Pbes2(p)
     }
 }
 
-impl PBES2 {
+impl Pbes2Algorithm {
     pub fn encrypt(
         self,
         payload: &[u8],
@@ -37,7 +37,7 @@ impl PBES2 {
         salt: &str,
         count: u32,
     ) -> Result<Vec<u8>, Error> {
-        use PBES2::{HS256_A128KW, HS384_A192KW, HS512_A256KW};
+        use Pbes2Algorithm::{HS256_A128KW, HS384_A192KW, HS512_A256KW};
 
         let cek = OctetKey::new(payload.to_vec());
         let key = OctetKey::new(key.to_vec());
@@ -59,7 +59,7 @@ impl PBES2 {
         salt: &str,
         count: u32,
     ) -> Result<Vec<u8>, Error> {
-        use PBES2::{HS256_A128KW, HS384_A192KW, HS512_A256KW};
+        use Pbes2Algorithm::{HS256_A128KW, HS384_A192KW, HS512_A256KW};
 
         let key = OctetKey::new(key.to_vec());
         let header = Pbes2Header {
@@ -172,7 +172,7 @@ pub struct Pbes2Header {
 macro_rules! pbes2 {
     ($id:ident, $sha:ty, $aes:ty, $name:ident, $key_len:expr) => {
         impl KMA for $id {
-            const ALG: super::Algorithm = super::Algorithm::PBES2(PBES2::$name);
+            const ALG: super::Algorithm = super::Algorithm::Pbes2(Pbes2Algorithm::$name);
             type Key = OctetKey;
             type Cek = OctetKey;
             type Header = Pbes2Header;
@@ -183,7 +183,7 @@ macro_rules! pbes2 {
                 key: &Self::Key,
                 settings: Self::WrapSettings,
             ) -> Result<(Vec<u8>, Self::Header), Error> {
-                let name = super::Algorithm::PBES2(PBES2::$name).as_str();
+                let name = super::Algorithm::Pbes2(Pbes2Algorithm::$name).as_str();
                 let mut salt = Vec::with_capacity(name.len() + 1 + settings.salt.len());
                 salt.extend_from_slice(name.as_bytes());
                 salt.push(0);
@@ -207,7 +207,7 @@ macro_rules! pbes2 {
                 key: &Self::Key,
                 settings: Self::Header,
             ) -> Result<Self::Cek, Error> {
-                let name = super::Algorithm::PBES2(PBES2::$name).as_str();
+                let name = super::Algorithm::Pbes2(Pbes2Algorithm::$name).as_str();
                 let mut salt = Vec::with_capacity(name.len() + 1 + settings.salt.len());
                 salt.extend_from_slice(name.as_bytes());
                 salt.push(0);
@@ -238,11 +238,17 @@ macro_rules! pbes2 {
 /// * [`PBES2_HS256_A128KW`] - PBES2 key management algorithm using SHA256 and AES128
 /// * [`PBES2_HS384_A192KW`] - PBES2 key management algorithm using SHA384 and AES192
 /// * [`PBES2_HS512_A256KW`] - PBES2 key management algorithm using SHA512 and AES256
-#[derive(Clone, Copy)]
 pub struct Pbes2<Sha, Aes> {
     _sha: PhantomData<Sha>,
     _aes: PhantomData<Aes>,
 }
+
+impl<Sha, Aes> Clone for Pbes2<Sha, Aes> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<Sha, Aes> Copy for Pbes2<Sha, Aes> {}
 
 impl<Sha, Aes> PartialEq for Pbes2<Sha, Aes> {
     fn eq(&self, _other: &Self) -> bool {
@@ -457,7 +463,7 @@ mod tests {
             ],
             base64::URL_SAFE_NO_PAD,
         );
-        let encrypted_cek = PBES2::HS256_A128KW
+        let encrypted_cek = Pbes2Algorithm::HS256_A128KW
             .encrypt(&payload, key, &salt, 4096)
             .unwrap();
 
@@ -470,7 +476,7 @@ mod tests {
             ]
         );
 
-        let decrypted_cek = PBES2::HS256_A128KW
+        let decrypted_cek = Pbes2Algorithm::HS256_A128KW
             .decrypt(&encrypted_cek, key, &salt, 4096)
             .unwrap();
 

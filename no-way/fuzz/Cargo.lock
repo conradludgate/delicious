@@ -170,7 +170,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "delicious-jose"
+name = "no-way"
 version = "0.1.0"
 dependencies = [
  "aead",
@@ -200,10 +200,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "delicious-jose-fuzz"
+name = "no-way-fuzz"
 version = "0.0.1"
 dependencies = [
- "delicious-jose",
+ "no-way",
  "libfuzzer-sys",
  "serde_json",
 ]

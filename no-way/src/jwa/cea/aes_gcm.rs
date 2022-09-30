@@ -14,15 +14,14 @@ use crate::{jwk::OctetKey, Error};
 /// * [`A128GCM`] - AES GCM using 128-bit key
 /// * [`A192GCM`] - AES GCM using 192-bit key
 /// * [`A256GCM`] - AES GCM using 256-bit key
-///
-/// Alternatively, used as [Key Encryption with AES GCM](https://datatracker.ietf.org/doc/html/rfc7518#section-4.7)
-///
-/// See:
-/// * [`A128GCMKW`](crate::jwa::kma::A128GCMKW) - Key wrapping with AES GCM using 128-bit key
-/// * [`A192GCMKW`](crate::jwa::kma::A192GCMKW) - Key wrapping with AES GCM using 192-bit key
-/// * [`A256GCMKW`](crate::jwa::kma::A256GCMKW) - Key wrapping with AES GCM using 256-bit key
-#[derive(Clone, Copy)]
 pub struct AesGcm<Aes>(PhantomData<Aes>);
+
+impl<Aes> Clone for AesGcm<Aes> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<Aes> Copy for AesGcm<Aes> {}
 
 impl<Aes> PartialEq for AesGcm<Aes> {
     fn eq(&self, _other: &Self) -> bool {

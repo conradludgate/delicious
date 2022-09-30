@@ -1,4 +1,4 @@
-# delicious-jose
+# no-way
 
 A library to work with Javascript Object Signing and Encryption(JOSE),
 including JSON Web Tokens (JWT), JSON Web Signature (JWS) and JSON Web Encryption (JWE)

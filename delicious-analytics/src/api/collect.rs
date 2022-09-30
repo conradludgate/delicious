@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     Json, TypedHeader,
 };
-use delicious_jose::{jwa::sign, jws::Decoded};
+use no_way::{jwa::sign, jws::Decoded};
 use headers_core::{Header, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -50,7 +50,7 @@ impl<B: Send> FromRequest<B> for Session {
     }
 }
 
-pub struct UmamiCache(delicious_jose::jws::Encoded<delicious_jose::Json<Session>>);
+pub struct UmamiCache(no_way::jws::Encoded<no_way::Json<Session>>);
 
 impl Header for UmamiCache {
     fn name() -> &'static HeaderName {

@@ -18,6 +18,13 @@ use std::marker::PhantomData;
 /// * [`ES384`] - ECDSA using P-384 and SHA-384
 pub struct Ecdsa<P>(PhantomData<P>);
 
+impl<P> Clone for Ecdsa<P> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<P> Copy for Ecdsa<P> {}
+
 impl<P> PartialEq for Ecdsa<P> {
     fn eq(&self, _other: &Self) -> bool {
         true

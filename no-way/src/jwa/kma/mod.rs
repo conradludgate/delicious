@@ -7,9 +7,11 @@ use crate::{errors::Error, jwk::OctetKey};
 pub(crate) mod aes_gcm;
 mod pbes2_aes_kw;
 
-pub use self::aes_gcm::{AesGcmKwHeader, A128GCMKW, A192GCMKW, A256GCMKW, AES_GCM};
+pub use self::aes_gcm::{
+    AesGcmKw, AesGcmKwAlgorithm, AesGcmKwHeader, A128GCMKW, A192GCMKW, A256GCMKW,
+};
 pub use pbes2_aes_kw::{
-    Pbes2, Pbes2Header, PBES2, PBES2_HS256_A128KW, PBES2_HS384_A192KW, PBES2_HS512_A256KW,
+    Pbes2, Pbes2Algorithm, Pbes2Header, PBES2_HS256_A128KW, PBES2_HS384_A192KW, PBES2_HS512_A256KW,
 };
 
 /// Algorithms for key management as defined in [RFC7518#4](https://tools.ietf.org/html/rfc7518#section-4)
@@ -40,9 +42,9 @@ pub enum Algorithm {
     /// ECDH-ES using Concat KDF and "A256KW" wrapping
     ECDH_ES_A256KW,
     /// Key wrapping with AES GCM. [RFC7518#4.7](https://tools.ietf.org/html/rfc7518#section-4.7)
-    AES_GCM_KW(AES_GCM),
+    AesGcmKw(AesGcmKwAlgorithm),
     /// PBES2 with HMAC SHA and AES key-wrapping. [RFC7518#4.8](https://tools.ietf.org/html/rfc7518#section-4.8)
-    PBES2(PBES2),
+    Pbes2(Pbes2Algorithm),
 }
 
 impl Default for Algorithm {
@@ -73,7 +75,7 @@ impl Algorithm {
         use self::Algorithm::*;
 
         match self {
-            A128KW | A192KW | A256KW | AES_GCM_KW(_) | PBES2(_) => {
+            A128KW | A192KW | A256KW | AesGcmKw(_) | Pbes2(_) => {
                 AlgorithmType::SymmetricKeyWrapping
             }
             RSA1_5 | RSA_OAEP | RSA_OAEP_256 => AlgorithmType::AsymmetricKeyEncryption,
@@ -163,7 +165,7 @@ impl KMA for DirectEncryption {
 }
 
 mod serde_impl {
-    use crate::jwa::kma::{AES_GCM, PBES2};
+    use crate::jwa::kma::{AesGcmKwAlgorithm, Pbes2Algorithm};
 
     use super::Algorithm;
 
@@ -204,12 +206,12 @@ mod serde_impl {
                         b"ECDH-ES+A128KW" => Algorithm::ECDH_ES_A128KW,
                         b"ECDH-ES+A192KW" => Algorithm::ECDH_ES_A192KW,
                         b"ECDH-ES+A256KW" => Algorithm::ECDH_ES_A256KW,
-                        b"A128GCMKW" => Algorithm::AES_GCM_KW(AES_GCM::A128),
-                        b"A192GCMKW" => Algorithm::AES_GCM_KW(AES_GCM::A192),
-                        b"A256GCMKW" => Algorithm::AES_GCM_KW(AES_GCM::A256),
-                        b"PBES2-HS256+A128KW" => Algorithm::PBES2(PBES2::HS256_A128KW),
-                        b"PBES2-HS384+A192KW" => Algorithm::PBES2(PBES2::HS384_A192KW),
-                        b"PBES2-HS512+A256KW" => Algorithm::PBES2(PBES2::HS512_A256KW),
+                        b"A128GCMKW" => Algorithm::AesGcmKw(AesGcmKwAlgorithm::A128),
+                        b"A192GCMKW" => Algorithm::AesGcmKw(AesGcmKwAlgorithm::A192),
+                        b"A256GCMKW" => Algorithm::AesGcmKw(AesGcmKwAlgorithm::A256),
+                        b"PBES2-HS256+A128KW" => Algorithm::Pbes2(Pbes2Algorithm::HS256_A128KW),
+                        b"PBES2-HS384+A192KW" => Algorithm::Pbes2(Pbes2Algorithm::HS384_A192KW),
+                        b"PBES2-HS512+A256KW" => Algorithm::Pbes2(Pbes2Algorithm::HS512_A256KW),
                         _ => {
                             let value = String::from_utf8_lossy(value);
                             return Err(serde::de::Error::unknown_variant(&value, VARIANTS));
@@ -284,12 +286,12 @@ mod serde_impl {
                 Algorithm::ECDH_ES_A128KW => "ECDH-ES+A128KW",
                 Algorithm::ECDH_ES_A192KW => "ECDH-ES+A192KW",
                 Algorithm::ECDH_ES_A256KW => "ECDH-ES+A256KW",
-                Algorithm::AES_GCM_KW(AES_GCM::A128) => "A128GCMKW",
-                Algorithm::AES_GCM_KW(AES_GCM::A192) => "A192GCMKW",
-                Algorithm::AES_GCM_KW(AES_GCM::A256) => "A256GCMKW",
-                Algorithm::PBES2(PBES2::HS256_A128KW) => "PBES2-HS256+A128KW",
-                Algorithm::PBES2(PBES2::HS384_A192KW) => "PBES2-HS384+A192KW",
-                Algorithm::PBES2(PBES2::HS512_A256KW) => "PBES2-HS512+A256KW",
+                Algorithm::AesGcmKw(AesGcmKwAlgorithm::A128) => "A128GCMKW",
+                Algorithm::AesGcmKw(AesGcmKwAlgorithm::A192) => "A192GCMKW",
+                Algorithm::AesGcmKw(AesGcmKwAlgorithm::A256) => "A256GCMKW",
+                Algorithm::Pbes2(Pbes2Algorithm::HS256_A128KW) => "PBES2-HS256+A128KW",
+                Algorithm::Pbes2(Pbes2Algorithm::HS384_A192KW) => "PBES2-HS384+A192KW",
+                Algorithm::Pbes2(Pbes2Algorithm::HS512_A256KW) => "PBES2-HS512+A256KW",
             }
         }
     }
@@ -311,12 +313,12 @@ mod serde_impl {
                 Algorithm::ECDH_ES_A128KW => 8u32,
                 Algorithm::ECDH_ES_A192KW => 9u32,
                 Algorithm::ECDH_ES_A256KW => 10u32,
-                Algorithm::AES_GCM_KW(AES_GCM::A128) => 11u32,
-                Algorithm::AES_GCM_KW(AES_GCM::A192) => 12u32,
-                Algorithm::AES_GCM_KW(AES_GCM::A256) => 13u32,
-                Algorithm::PBES2(PBES2::HS256_A128KW) => 14u32,
-                Algorithm::PBES2(PBES2::HS384_A192KW) => 15u32,
-                Algorithm::PBES2(PBES2::HS512_A256KW) => 16u32,
+                Algorithm::AesGcmKw(AesGcmKwAlgorithm::A128) => 11u32,
+                Algorithm::AesGcmKw(AesGcmKwAlgorithm::A192) => 12u32,
+                Algorithm::AesGcmKw(AesGcmKwAlgorithm::A256) => 13u32,
+                Algorithm::Pbes2(Pbes2Algorithm::HS256_A128KW) => 14u32,
+                Algorithm::Pbes2(Pbes2Algorithm::HS384_A192KW) => 15u32,
+                Algorithm::Pbes2(Pbes2Algorithm::HS512_A256KW) => 16u32,
             };
             serializer.serialize_unit_variant("KeyManagementAlgorithm", idx, self.as_str())
         }

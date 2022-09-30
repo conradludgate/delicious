@@ -7,7 +7,7 @@ use sha2::{Digest, Sha512};
 mod postgres;
 
 #[derive(Clone)]
-pub struct SecretKey(delicious_jose::jwk::OctetKey);
+pub struct SecretKey(no_way::jwk::OctetKey);
 
 impl SecretKey {
     fn from_request<B>(req: &RequestParts<B>) -> &Self {
@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database_url = env::var("DATABASE_URL")?;
 
     let key = hash_salt.as_deref().unwrap_or(&database_url);
-    let key = SecretKey(delicious_jose::jwk::OctetKey::new(
+    let key = SecretKey(no_way::jwk::OctetKey::new(
         hex::encode(Sha512::new().chain_update(key).finalize()).into_bytes(),
     ));
 

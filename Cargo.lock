@@ -260,10 +260,10 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
- "delicious-jose",
  "futures",
  "headers-core",
  "hex",
+ "no-way",
  "serde",
  "serde_json",
  "sha2",
@@ -275,39 +275,6 @@ dependencies = [
  "tracing-subscriber",
  "tracing-tree",
  "uuid",
-]
-
-[[package]]
-name = "delicious-jose"
-version = "0.1.0"
-dependencies = [
- "aead",
- "aes",
- "aes-gcm",
- "base64",
- "bytemuck",
- "cbc",
- "cipher",
- "crypto-common",
- "digest",
- "ecdsa",
- "elliptic-curve",
- "hex",
- "hex-literal",
- "hmac",
- "num-bigint",
- "num-traits",
- "p256",
- "p384",
- "pbkdf2",
- "rand",
- "sec1",
- "serde",
- "serde_json",
- "serde_test",
- "sha2",
- "signature",
- "time",
 ]
 
 [[package]]
@@ -755,6 +722,39 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys",
+]
+
+[[package]]
+name = "no-way"
+version = "0.1.0"
+dependencies = [
+ "aead",
+ "aes",
+ "aes-gcm",
+ "base64",
+ "bytemuck",
+ "cbc",
+ "cipher",
+ "crypto-common",
+ "digest",
+ "ecdsa",
+ "elliptic-curve",
+ "hex",
+ "hex-literal",
+ "hmac",
+ "num-bigint",
+ "num-traits",
+ "p256",
+ "p384",
+ "pbkdf2",
+ "rand",
+ "sec1",
+ "serde",
+ "serde_json",
+ "serde_test",
+ "sha2",
+ "signature",
+ "time",
 ]
 
 [[package]]

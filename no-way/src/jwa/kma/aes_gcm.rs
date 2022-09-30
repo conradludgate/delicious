@@ -1,12 +1,12 @@
 use super::KMA;
-pub use crate::jwa::cea::AesGcm;
+use crate::jwa::cea::AesGcm;
 use crate::{errors::Error, jwk::OctetKey};
 use serde::{Deserialize, Serialize};
 
 /// Key wrapping with AES GCM. [RFC7518#4.7](https://tools.ietf.org/html/rfc7518#section-4.7)
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 #[allow(non_camel_case_types)]
-pub enum AES_GCM {
+pub enum AesGcmKwAlgorithm {
     /// Key wrapping with AES GCM using 128-bit key alg
     A128,
     /// Key wrapping with AES GCM using 192-bit key alg.
@@ -16,15 +16,23 @@ pub enum AES_GCM {
     A256,
 }
 
+/// [Key Encryption with AES GCM](https://datatracker.ietf.org/doc/html/rfc7518#section-4.7)
+///
+/// See:
+/// * [`A128GCMKW`](crate::jwa::kma::A128GCMKW) - Key wrapping with AES GCM using 128-bit key
+/// * [`A192GCMKW`](crate::jwa::kma::A192GCMKW) - Key wrapping with AES GCM using 192-bit key
+/// * [`A256GCMKW`](crate::jwa::kma::A256GCMKW) - Key wrapping with AES GCM using 256-bit key
+pub type AesGcmKw<Aes> = AesGcm<Aes>;
+
 #[allow(non_camel_case_types)]
 /// Key wrapping with AES GCM using 128-bit key
-pub type A128GCMKW = AesGcm<aes::Aes128>;
+pub type A128GCMKW = AesGcmKw<aes::Aes128>;
 #[allow(non_camel_case_types)]
 /// Key wrapping with AES GCM using 192-bit key
-pub type A192GCMKW = AesGcm<aes::Aes192>;
+pub type A192GCMKW = AesGcmKw<aes::Aes192>;
 #[allow(non_camel_case_types)]
 /// Key wrapping with AES GCM using 256-bit key
-pub type A256GCMKW = AesGcm<aes::Aes256>;
+pub type A256GCMKW = AesGcmKw<aes::Aes256>;
 
 /// Header for AES GCM Keywrap algorithm.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -39,7 +47,7 @@ pub struct AesGcmKwHeader {
 macro_rules! aes_gcm {
     ($id:ident, $aes:ty, $name:ident) => {
         impl KMA for $id {
-            const ALG: super::Algorithm = super::Algorithm::AES_GCM_KW(AES_GCM::$name);
+            const ALG: super::Algorithm = super::Algorithm::AesGcmKw(AesGcmKwAlgorithm::$name);
             type Key = OctetKey;
             type Cek = OctetKey;
             type Header = AesGcmKwHeader;
@@ -80,9 +88,9 @@ aes_gcm!(A128GCMKW, aes::Aes128, A128);
 aes_gcm!(A192GCMKW, aes::Aes192, A192);
 aes_gcm!(A256GCMKW, aes::Aes256, A256);
 
-impl From<AES_GCM> for super::Algorithm {
-    fn from(a: AES_GCM) -> Self {
-        super::Algorithm::AES_GCM_KW(a)
+impl From<AesGcmKwAlgorithm> for super::Algorithm {
+    fn from(a: AesGcmKwAlgorithm) -> Self {
+        super::Algorithm::AesGcmKw(a)
     }
 }
 

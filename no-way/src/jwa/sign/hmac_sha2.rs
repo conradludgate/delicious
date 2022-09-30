@@ -14,6 +14,13 @@ use std::marker::PhantomData;
 /// * [`HS512`] - HMAC using SHA-512
 pub struct HmacSha<Sha>(PhantomData<Sha>);
 
+impl<Sha> Clone for HmacSha<Sha> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<Sha> Copy for HmacSha<Sha> {}
+
 impl<Sha> PartialEq for HmacSha<Sha> {
     fn eq(&self, _other: &Self) -> bool {
         true

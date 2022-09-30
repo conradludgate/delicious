@@ -13,10 +13,32 @@ use crate::{errors::Error, jwk::OctetKey};
 /// * [`A128CBC_HS256`] - Content Encryption with AES_128_CBC_HMAC_SHA_256
 /// * [`A192CBC_HS384`] - Content Encryption with AES_192_CBC_HMAC_SHA_384
 /// * [`A256CBC_HS512`] - Content Encryption with AES_256_CBC_HMAC_SHA_512
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AesCbcHmacSha2<Aes, Sha> {
     _sha: PhantomData<Sha>,
     _aes: PhantomData<Aes>,
+}
+
+impl<Aes, Sha> Clone for AesCbcHmacSha2<Aes, Sha> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<Aes, Sha> Copy for AesCbcHmacSha2<Aes, Sha> {}
+
+impl<Aes, Sha> PartialEq for AesCbcHmacSha2<Aes, Sha> {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+impl<Aes, Sha> Eq for AesCbcHmacSha2<Aes, Sha> {}
+
+impl<Aes, Sha> std::fmt::Debug for AesCbcHmacSha2<Aes, Sha>
+where
+    Self: CEA,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(Self::ENC.as_str())
+    }
 }
 
 #[allow(non_camel_case_types)]
