@@ -369,8 +369,8 @@ pub struct EllipticCurveKeyParameters {
 impl EllipticCurveKeyParameters {
     pub(crate) fn read_pub_sec1_bytes(&self, output: &mut [u8]) -> Result<(), Error> {
         let n = match self.curve {
-            EllipticCurve::P256 => 256/8,
-            EllipticCurve::P384 => 384/8,
+            EllipticCurve::P256 => 256 / 8,
+            EllipticCurve::P384 => 384 / 8,
             EllipticCurve::P521 => unimplemented!(),
             EllipticCurve::Curve25519 => unimplemented!(),
             EllipticCurve::Curve448 => unimplemented!(),
@@ -391,8 +391,8 @@ impl EllipticCurveKeyParameters {
     }
     pub(crate) fn read_priv_bytes(&self, output: &mut [u8]) -> Result<(), Error> {
         let n = match self.curve {
-            EllipticCurve::P256 => 256/8,
-            EllipticCurve::P384 => 384/8,
+            EllipticCurve::P256 => 256 / 8,
+            EllipticCurve::P384 => 384 / 8,
             EllipticCurve::P521 => unimplemented!(),
             EllipticCurve::Curve25519 => unimplemented!(),
             EllipticCurve::Curve448 => unimplemented!(),

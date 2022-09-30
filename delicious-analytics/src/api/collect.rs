@@ -4,15 +4,12 @@ use axum::{
     http::StatusCode,
     Json, TypedHeader,
 };
-use delicious_jose::{
-    jwa::sign,
-    jws::{Decoded, Secret},
-};
+use delicious_jose::{jwa::sign, jws::Decoded};
 use headers_core::{Header, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::postgres::Client;
+use crate::{postgres::Client, SecretKey};
 
 #[derive(Deserialize)]
 pub struct SessionBody {
@@ -42,13 +39,9 @@ impl<B: Send> FromRequest<B> for Session {
 
         let cache: Option<TypedHeader<UmamiCache>> = req.extract().await.unwrap_or(None);
         if let Some(TypedHeader(cache)) = cache {
-            let secret: &Secret = req
-                .extensions()
-                .get()
-                .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+            let secret = SecretKey::from_request(req);
 
-            if let Ok(session) =
-                Decoded::<Session, ()>::decode_json(cache.0, secret, sign::Algorithm::HS256)
+            if let Ok(session) = Decoded::<Session>::decode_json::<sign::HS256>(cache.0, &secret.0)
             {
                 return Ok(session.payload);
             }

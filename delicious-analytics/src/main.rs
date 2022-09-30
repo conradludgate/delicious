@@ -13,9 +13,6 @@ impl SecretKey {
     fn from_request<B>(req: &RequestParts<B>) -> &Self {
         req.extensions().get().unwrap()
     }
-    fn to_secret(&self) -> delicious_jose::jws::Secret {
-        delicious_jose::jws::Secret::Bytes(self.0.as_bytes().to_vec())
-    }
 }
 
 #[tokio::main]

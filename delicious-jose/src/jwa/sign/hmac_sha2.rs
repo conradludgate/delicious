@@ -1,5 +1,8 @@
 use super::Sign;
-use crate::jwk::OctetKey;
+use crate::{
+    errors::{Error, ValidationError},
+    jwk::OctetKey,
+};
 use hmac::{Hmac, Mac};
 use std::marker::PhantomData;
 
@@ -40,7 +43,7 @@ macro_rules! hmac_sha {
             const ALG: super::Algorithm = super::Algorithm::$id;
             type Key = OctetKey;
 
-            fn sign(key: &Self::Key, data: &[u8]) -> Result<Vec<u8>, crate::errors::Error> {
+            fn sign(key: &Self::Key, data: &[u8]) -> Result<Vec<u8>, Error> {
                 Ok(Hmac::<$sha>::new_from_slice(key.as_bytes())?
                     .chain_update(data)
                     .finalize()
@@ -52,10 +55,11 @@ macro_rules! hmac_sha {
                 key: &Self::Key,
                 data: &[u8],
                 signature: &[u8],
-            ) -> Result<(), crate::errors::Error> {
-                Ok(Hmac::<$sha>::new_from_slice(key.as_bytes())?
+            ) -> Result<(), Error> {
+                Hmac::<$sha>::new_from_slice(key.as_bytes())?
                     .chain_update(data)
-                    .verify_slice(signature)?)
+                    .verify_slice(signature)
+                    .map_err(|_| Error::ValidationError(ValidationError::InvalidSignature))
             }
         }
     };

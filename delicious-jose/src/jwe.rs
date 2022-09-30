@@ -524,7 +524,8 @@ mod tests {
     use serde_test::{assert_tokens, Token};
 
     use super::*;
-    use crate::jwa::{self, cea};
+    use crate::jwa::{cea, sign};
+    use crate::jwk::OctetKey;
     use crate::test::{assert_serde_json, random_vec};
     use crate::{jwk, jws, Json};
 
@@ -532,7 +533,7 @@ mod tests {
         random_vec(12)
     }
 
-    fn cek_oct_key(len: usize) -> jwk::OctetKey {
+    fn cek_oct_key(len: usize) -> OctetKey {
         jwk::OctetKey::new(random_vec(len))
     }
 
@@ -730,16 +731,10 @@ mod tests {
             },
             private: Default::default(),
         };
-        let jws = jws::Decoded::new(
-            From::from(jws::RegisteredHeader {
-                algorithm: jwa::sign::Algorithm::HS256,
-                ..Default::default()
-            }),
-            claims,
-        );
-        let jws = jws
-            .encode(&jws::Secret::Bytes("secret".to_string().into_bytes()))
-            .unwrap();
+
+        let key = OctetKey::new("secret".to_string().into_bytes());
+        let jws = jws::Decoded::new(claims);
+        let jws = jws.encode::<sign::HS256>(&key).unwrap();
 
         // Construct the encryption key
         let key = cek_oct_key(256 / 8);
@@ -788,16 +783,10 @@ mod tests {
             },
             private: Default::default(),
         };
-        let jws = jws::Decoded::new(
-            From::from(jws::RegisteredHeader {
-                algorithm: jwa::sign::Algorithm::HS256,
-                ..Default::default()
-            }),
-            claims,
-        );
-        let jws = jws
-            .encode(&jws::Secret::Bytes("secret".to_string().into_bytes()))
-            .unwrap();
+
+        let key = OctetKey::new("secret".to_string().into_bytes());
+        let jws = jws::Decoded::new(claims);
+        let jws = jws.encode::<sign::HS256>(&key).unwrap();
 
         // Construct the encryption key
         let key = cek_oct_key(256 / 8);

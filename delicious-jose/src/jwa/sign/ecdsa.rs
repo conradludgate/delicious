@@ -1,10 +1,13 @@
 use super::Sign;
-use crate::jwk::{EllipticCurve, EllipticCurveKeyParameters};
+use crate::{
+    errors::{Error, ValidationError},
+    jwk::{EllipticCurve, EllipticCurveKeyParameters},
+};
+use ecdsa::{SigningKey, VerifyingKey};
 use elliptic_curve::{
     sec1::{EncodedPoint, ValidatePublicKey},
     SecretKey,
 };
-use ecdsa::{SigningKey, VerifyingKey};
 use signature::{Signer, Verifier};
 use std::marker::PhantomData;
 
@@ -42,9 +45,9 @@ macro_rules! ecdsa {
             const ALG: super::Algorithm = super::Algorithm::$id;
             type Key = EllipticCurveKeyParameters;
 
-            fn sign(key: &Self::Key, data: &[u8]) -> Result<Vec<u8>, crate::errors::Error> {
+            fn sign(key: &Self::Key, data: &[u8]) -> Result<Vec<u8>, Error> {
                 if key.curve != $curve {
-                    return Err(crate::errors::Error::UnspecifiedCryptographicError);
+                    return Err(Error::UnspecifiedCryptographicError);
                 }
                 let mut key_bytes = [0; $n * 2 + 1];
                 key.read_pub_sec1_bytes(&mut key_bytes)?;
@@ -53,24 +56,20 @@ macro_rules! ecdsa {
                 let priv_key = SecretKey::<$p>::from_be_bytes(&key_bytes[..$n])?;
                 <$p>::validate_public_key(&priv_key, &pub_key)?;
 
-                Ok(SigningKey::<$p>::from(priv_key)
-                    .sign(data)
-                    .to_vec())
+                Ok(SigningKey::<$p>::from(priv_key).sign(data).to_vec())
             }
 
-            fn verify(
-                key: &Self::Key,
-                data: &[u8],
-                signature: &[u8],
-            ) -> Result<(), crate::errors::Error> {
+            fn verify(key: &Self::Key, data: &[u8], signature: &[u8]) -> Result<(), Error> {
                 if key.curve != $curve {
-                    return Err(crate::errors::Error::UnspecifiedCryptographicError);
+                    return Err(Error::UnspecifiedCryptographicError);
                 }
                 let mut key_bytes = [0; $n * 2 + 1];
                 key.read_pub_sec1_bytes(&mut key_bytes)?;
                 let pub_key = VerifyingKey::<$p>::from_sec1_bytes(&key_bytes)?;
 
-                Ok(pub_key.verify(data, &signature.try_into()?)?)
+                pub_key
+                    .verify(data, &signature.try_into()?)
+                    .map_err(|_| Error::ValidationError(ValidationError::InvalidSignature))
             }
         }
     };
