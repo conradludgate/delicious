@@ -7,7 +7,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use crate::errors::{Error, ValidationError};
-use crate::jwa::sign;
+use crate::jwa::{self, sign};
+use crate::jwk;
 use crate::{CompactPart, Json};
 
 use super::Header;
@@ -226,76 +227,52 @@ where
         Ok(Self::new_with_header(payload, header.private))
     }
 
-    // /// Decode a token into the JWT struct and verify its signature using a JWKS
-    // ///
-    // /// If the JWK does not contain an optional algorithm parameter, you will have to specify
-    // /// the expected algorithm or an error will be returned.
-    // ///
-    // /// If the JWK specifies an algorithm and you provide an expected algorithm,
-    // /// both will be checked for equality. If they do not match, an error will be returned.
-    // ///
-    // /// If the token or its signature is invalid, it will return an error
-    // pub fn decode_with_jwks<J>(
-    //     encoded: Encoded<T, H>,
-    //     jwks: &JWKSet<J>,
-    //     expected_algorithm: Option<sign::Algorithm>,
-    // ) -> Result<Self, Error> {
-    //     let Encoded {
-    //         header,
-    //         payload,
-    //         payload_base64,
-    //         signature,
-    //     } = encoded;
+    /// Decode a token into the JWT struct and verify its signature using a JWKS
+    ///
+    /// If the JWK does not contain an optional algorithm parameter, you will have to specify
+    /// the expected algorithm or an error will be returned.
+    ///
+    /// If the JWK specifies an algorithm and you provide an expected algorithm,
+    /// both will be checked for equality. If they do not match, an error will be returned.
+    ///
+    /// If the token or its signature is invalid, it will return an error
+    pub fn decode_with_jwks<J, Sign>(
+        encoded: Encoded<T, H>,
+        jwks: &jwk::JWKSet<J>,
+    ) -> Result<Self, Error>
+    where
+        Sign: sign::Sign,
+        Sign::Key: jwk::Key,
+    {
+        let Encoded {
+            header,
+            payload,
+            payload_base64,
+            signature,
+        } = encoded;
 
-    //     let key_id = header
-    //         .registered
-    //         .key_id
-    //         .as_ref()
-    //         .ok_or(ValidationError::KidMissing)?;
-    //     let jwk = jwks.find(key_id).ok_or(ValidationError::KeyNotFound)?;
+        let key_id = header
+            .registered
+            .key_id
+            .as_ref()
+            .ok_or(ValidationError::KidMissing)?;
+        let jwk = jwks.find(key_id).ok_or(ValidationError::KeyNotFound)?;
 
-    //     let algorithm = match jwk.specified.common.algorithm {
-    //         Some(jwk_alg) => {
-    //             let algorithm = match jwk_alg {
-    //                 Algorithm::Signature(algorithm) => algorithm,
-    //                 _ => Err(ValidationError::UnsupportedKeyAlgorithm)?,
-    //             };
+        match jwk.specified.common.algorithm {
+            None => {}
+            Some(jwa::Algorithm::Signature(s)) if s == Sign::ALG => {}
+            Some(_) => return Err(ValidationError::UnsupportedKeyAlgorithm.into()),
+        }
 
-    //             if header.registered.algorithm != algorithm {
-    //                 Err(ValidationError::WrongAlgorithmHeader)?;
-    //             }
+        if header.registered.algorithm != Sign::ALG {
+            return Err(ValidationError::WrongAlgorithmHeader.into());
+        }
 
-    //             if let Some(expected_algorithm) = expected_algorithm {
-    //                 if expected_algorithm != algorithm {
-    //                     Err(ValidationError::WrongAlgorithmHeader)?;
-    //                 }
-    //             }
+        let key = <Sign::Key as jwk::Key>::get(&jwk.specified)?;
+        Sign::verify(key, payload_base64.as_bytes(), &signature)?;
 
-    //             algorithm
-    //         }
-    //         None => match expected_algorithm {
-    //             Some(expected_algorithm) => {
-    //                 if expected_algorithm != header.registered.algorithm {
-    //                     Err(ValidationError::WrongAlgorithmHeader)?;
-    //                 }
-    //                 expected_algorithm
-    //             }
-    //             None => Err(ValidationError::MissingAlgorithm)?,
-    //         },
-    //     };
-
-    //     let secret = match &jwk.specified.algorithm {
-    //         AlgorithmParameters::RSA(rsa) => rsa.jws_public_key_secret(),
-    //         AlgorithmParameters::OctetKey(oct) => Secret::Bytes(oct.value.clone()),
-    //         _ => Err(ValidationError::UnsupportedKeyAlgorithm)?,
-    //     };
-
-    //     algorithm
-    //         .verify(signature.as_ref(), payload_base64.as_bytes(), &secret)
-    //         .map_err(|_| ValidationError::InvalidSignature)?;
-
-    //     Ok(Self::new(header, payload))
-    // }
+        Ok(Self::new_with_header(payload, header.private))
+    }
 }
 
 /// Convenience implementation for a Compact that contains a `ClaimsSet`
@@ -326,7 +303,9 @@ mod tests {
 
     use super::{sign, Decoded, Encoded};
     use crate::errors::Error;
-    use crate::jwk::{EllipticCurve, EllipticCurveKeyParameters, EllipticCurveKeyType, OctetKey};
+    use crate::jwk::{
+        EllipticCurve, EllipticCurveKeyParameters, EllipticCurveKeyType, JWKSet, OctetKey,
+    };
     use crate::{ClaimsSet, CompactPart, RegisteredClaims, SingleOrMultiple};
 
     #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -543,7 +522,7 @@ mod tests {
     //     .unwrap();
     //     let public_key = Secret::public_key_from_file("test/fixtures/rsa_public_key.der").unwrap();
     //     let claims =
-    //         Decoded::<PrivateClaims, ()>::decode(token, &public_key, sign::Algorithm::RS256);
+    //         Decoded::<PrivateClaims>::decode(token, &public_key, sign::Algorithm::RS256);
     //     let _ = claims.unwrap();
     // }
 
@@ -582,193 +561,116 @@ mod tests {
         assert_eq!(payload, biscuit.payload);
     }
 
-    // #[test]
-    // fn compact_jws_decode_with_jwks_shared_secret() {
-    //     let token = Encoded::from_str(
-    //         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
-    //          eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-    //          nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-    //     )
-    //     .unwrap();
+    #[test]
+    fn compact_jws_decode_with_jwks_shared_secret() {
+        let token = Encoded::from_str(
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
+             eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
+        )
+        .unwrap();
 
-    //     let jwks: JWKSet<()> = serde_json::from_str(
-    //         r#"{
-    //         "keys": [
-    //                     {
-    //                         "kty": "oct",
-    //                         "use": "sig",
-    //                         "kid": "key0",
-    //                         "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY",
-    //                         "alg": "HS256"
-    //                     }
-    //         ]
-    //     }"#,
-    //     )
-    //     .unwrap();
+        let jwks: JWKSet = serde_json::from_str(
+            r#"{
+            "keys": [
+                {
+                    "kty": "oct",
+                    "use": "sig",
+                    "kid": "key0",
+                    "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY",
+                    "alg": "HS256"
+                }
+            ]
+        }"#,
+        )
+        .unwrap();
 
-    //     let _ =
-    //         Decoded::<PrivateClaims, ()>::decode_with_jwks(token, &jwks, None).expect("to succeed");
-    // }
+        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+    }
 
-    // /// JWK has algorithm and user provided a matching expected algorithm
-    // #[test]
-    // fn compact_jws_decode_with_jwks_shared_secret_matching_alg() {
-    //     let token = Encoded::from_str(
-    //         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
-    //          eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-    //          nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-    //     )
-    //     .unwrap();
+    /// JWK has algorithm and user provided a non-matching expected algorithm
+    #[test]
+    #[should_panic(expected = "UnsupportedKeyAlgorithm")]
+    fn compact_jws_decode_with_jwks_shared_secret_mismatched_alg() {
+        let token = Encoded::from_str(
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
+             eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
+        )
+        .unwrap();
 
-    //     let jwks: JWKSet<()> = serde_json::from_str(
-    //         r#"{
-    //         "keys": [
-    //                     {
-    //                         "kty": "oct",
-    //                         "use": "sig",
-    //                         "kid": "key0",
-    //                         "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY",
-    //                         "alg": "HS256"
-    //                     }
-    //         ]
-    //     }"#,
-    //     )
-    //     .unwrap();
+        let jwks: JWKSet = serde_json::from_str(
+            r#"{
+            "keys": [
+                {
+                    "kty": "oct",
+                    "use": "sig",
+                    "kid": "key0",
+                    "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY",
+                    "alg": "HS256"
+                }
+            ]
+        }"#,
+        )
+        .unwrap();
 
-    //     let _ = Decoded::<PrivateClaims, ()>::decode_with_jwks(
-    //         token,
-    //         &jwks,
-    //         Some(sign::Algorithm::HS256),
-    //     )
-    //     .expect("to succeed");
-    // }
+        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::ES256>(token, &jwks).unwrap();
+    }
 
-    // /// JWK has algorithm and user provided a non-matching expected algorithm
-    // #[test]
-    // #[should_panic(expected = "WrongAlgorithmHeader")]
-    // fn compact_jws_decode_with_jwks_shared_secret_mismatched_alg() {
-    //     let token = Encoded::from_str(
-    //         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
-    //          eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-    //          nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-    //     )
-    //     .unwrap();
+    /// JWK has no algorithm and user provided a header matching expected algorithm
+    #[test]
+    fn compact_jws_decode_with_jwks_without_alg() {
+        let token = Encoded::from_str(
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
+             eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
+        )
+        .unwrap();
 
-    //     let jwks: JWKSet<()> = serde_json::from_str(
-    //         r#"{
-    //         "keys": [
-    //                     {
-    //                         "kty": "oct",
-    //                         "use": "sig",
-    //                         "kid": "key0",
-    //                         "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY",
-    //                         "alg": "HS256"
-    //                     }
-    //         ]
-    //     }"#,
-    //     )
-    //     .unwrap();
+        let jwks: JWKSet = serde_json::from_str(
+            r#"{
+            "keys": [
+                {
+                    "kty": "oct",
+                    "use": "sig",
+                    "kid": "key0",
+                    "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY"
+                }
+            ]
+        }"#,
+        )
+        .unwrap();
 
-    //     let _ = Decoded::<PrivateClaims, ()>::decode_with_jwks(
-    //         token,
-    //         &jwks,
-    //         Some(sign::Algorithm::RS256),
-    //     )
-    //     .unwrap();
-    // }
+        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+    }
 
-    // /// JWK has no algorithm and user provided a header matching expected algorithm
-    // #[test]
-    // fn compact_jws_decode_with_jwks_without_alg() {
-    //     let token = Encoded::from_str(
-    //         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
-    //          eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-    //          nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-    //     )
-    //     .unwrap();
+    /// JWK has no algorithm and user provided a header not-matching expected algorithm
+    #[test]
+    #[should_panic(expected = "WrongAlgorithmHeader")]
+    fn compact_jws_decode_with_jwks_without_alg_non_matching() {
+        let token = Encoded::from_str(
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
+             eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
+        )
+        .unwrap();
 
-    //     let jwks: JWKSet<()> = serde_json::from_str(
-    //         r#"{
-    //         "keys": [
-    //                     {
-    //                         "kty": "oct",
-    //                         "use": "sig",
-    //                         "kid": "key0",
-    //                         "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY"
-    //                     }
-    //         ]
-    //     }"#,
-    //     )
-    //     .unwrap();
+        let jwks: JWKSet = serde_json::from_str(
+            r#"{
+            "keys": [
+                {
+                    "kty": "oct",
+                    "use": "sig",
+                    "kid": "key0",
+                    "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY"
+                }
+            ]
+        }"#,
+        )
+        .unwrap();
 
-    //     let _ = Decoded::<PrivateClaims, ()>::decode_with_jwks(
-    //         token,
-    //         &jwks,
-    //         Some(sign::Algorithm::HS256),
-    //     )
-    //     .unwrap();
-    // }
-
-    // /// JWK has no algorithm and user provided a header not-matching expected algorithm
-    // #[test]
-    // #[should_panic(expected = "WrongAlgorithmHeader")]
-    // fn compact_jws_decode_with_jwks_without_alg_non_matching() {
-    //     let token = Encoded::from_str(
-    //         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
-    //          eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-    //          nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-    //     )
-    //     .unwrap();
-
-    //     let jwks: JWKSet<()> = serde_json::from_str(
-    //         r#"{
-    //         "keys": [
-    //                     {
-    //                         "kty": "oct",
-    //                         "use": "sig",
-    //                         "kid": "key0",
-    //                         "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY"
-    //                     }
-    //         ]
-    //     }"#,
-    //     )
-    //     .unwrap();
-
-    //     let _ = Decoded::<PrivateClaims, ()>::decode_with_jwks(
-    //         token,
-    //         &jwks,
-    //         Some(sign::Algorithm::RS256),
-    //     )
-    //     .unwrap();
-    // }
-
-    // /// JWK has no algorithm and user did not provide any expected algorithm
-    // #[test]
-    // #[should_panic(expected = "MissingAlgorithm")]
-    // fn compact_jws_decode_with_jwks_missing_alg() {
-    //     let token = Encoded::from_str(
-    //         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
-    //          eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-    //          nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-    //     )
-    //     .unwrap();
-
-    //     let jwks: JWKSet<()> = serde_json::from_str(
-    //         r#"{
-    //         "keys": [
-    //                     {
-    //                         "kty": "oct",
-    //                         "use": "sig",
-    //                         "kid": "key0",
-    //                         "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY"
-    //                     }
-    //         ]
-    //     }"#,
-    //     )
-    //     .unwrap();
-
-    //     let _ = Decoded::<PrivateClaims, ()>::decode_with_jwks(token, &jwks, None).unwrap();
-    // }
+        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::ES256>(token, &jwks).unwrap();
+    }
 
     // #[test]
     // fn compact_jws_decode_with_jwks_rsa() {
@@ -783,7 +685,7 @@ mod tests {
     //     )
     //     .unwrap();
 
-    //     let jwks: JWKSet<()> = serde_json::from_str(
+    //     let jwks: JWKSet = serde_json::from_str(
     //         r#"{
     //         "keys": [
     //                     {
@@ -799,177 +701,131 @@ mod tests {
     //     )
     //     .unwrap();
 
-    //     let _ =
-    //         Decoded::<PrivateClaims, ()>::decode_with_jwks(token, &jwks, None).expect("to succeed");
+    //     let _ = Decoded::<PrivateClaims>::decode_with_jwks(token, &jwks, None).unwrap();
     // }
 
-    // #[test]
-    // #[should_panic(expected = "PartsLengthError { expected: 3, actual: 2 }")]
-    // fn compact_jws_decode_with_jwks_missing_parts() {
-    //     let token = Encoded::from_str(
-    //         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
-    //          eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ",
-    //     )
-    //     .unwrap();
+    #[test]
+    #[should_panic(expected = "PartsLengthError { expected: 3, actual: 2 }")]
+    fn compact_jws_decode_with_jwks_missing_parts() {
+        let _ = Encoded::<()>::from_str(
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
+             eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ",
+        )
+        .unwrap();
+    }
 
-    //     let jwks: JWKSet<()> = serde_json::from_str(
-    //         r#"{
-    //         "keys": [
-    //                     {
-    //                         "kty": "oct",
-    //                         "use": "sig",
-    //                         "kid": "key0",
-    //                         "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY",
-    //                         "alg": "HS256"
-    //                     }
-    //         ]
-    //     }"#,
-    //     )
-    //     .unwrap();
+    #[test]
+    #[should_panic(expected = "KeyNotFound")]
+    fn compact_jws_decode_with_jwks_key_not_found() {
+        let token = Encoded::from_str(
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
+             eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
+        )
+        .unwrap();
 
-    //     let _ = Decoded::<PrivateClaims, ()>::decode_with_jwks(token, &jwks, None).unwrap();
-    // }
+        let jwks: JWKSet = serde_json::from_str(
+            r#"{
+            "keys": [
+                {
+                    "kty": "oct",
+                    "use": "sig",
+                    "kid": "keyX",
+                    "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY",
+                    "alg": "HS256"
+                }
+            ]
+        }"#,
+        )
+        .unwrap();
 
-    // #[test]
-    // #[should_panic(expected = "WrongAlgorithmHeader")]
-    // fn compact_jws_decode_with_jwks_wrong_algorithm() {
-    //     let token = Encoded::from_str(
-    //         "eyJhbGciOiJIUzM4NCIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
-    //          eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-    //          nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-    //     )
-    //     .unwrap();
+        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+    }
 
-    //     let jwks: JWKSet<()> = serde_json::from_str(
-    //         r#"{
-    //         "keys": [
-    //                     {
-    //                         "kty": "oct",
-    //                         "use": "sig",
-    //                         "kid": "key0",
-    //                         "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY",
-    //                         "alg": "HS256"
-    //                     }
-    //         ]
-    //     }"#,
-    //     )
-    //     .unwrap();
+    #[test]
+    #[should_panic(expected = "KidMissing")]
+    fn compact_jws_decode_with_jwks_kid_missing() {
+        let token = Encoded::from_str(
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.\
+             eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
+             QhdrScTpNXF2d0RbG_UTWu2gPKZfzANj6XC4uh-wOoU",
+        )
+        .unwrap();
 
-    //     let _ = Decoded::<PrivateClaims, ()>::decode_with_jwks(token, &jwks, None).unwrap();
-    // }
+        let jwks: JWKSet = serde_json::from_str(
+            r#"{
+            "keys": [
+                {
+                    "kty": "oct",
+                    "use": "sig",
+                    "kid": "key0",
+                    "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY",
+                    "alg": "HS256"
+                }
+            ]
+        }"#,
+        )
+        .unwrap();
 
-    // #[test]
-    // #[should_panic(expected = "KeyNotFound")]
-    // fn compact_jws_decode_with_jwks_key_not_found() {
-    //     let token = Encoded::from_str(
-    //         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
-    //          eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-    //          nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-    //     )
-    //     .unwrap();
+        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+    }
 
-    //     let jwks: JWKSet<()> = serde_json::from_str(
-    //         r#"{
-    //         "keys": [
-    //                     {
-    //                         "kty": "oct",
-    //                         "use": "sig",
-    //                         "kid": "keyX",
-    //                         "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY",
-    //                         "alg": "HS256"
-    //                     }
-    //         ]
-    //     }"#,
-    //     )
-    //     .unwrap();
+    #[test]
+    #[should_panic(expected = "UnsupportedKeyAlgorithm")]
+    fn compact_jws_decode_with_jwks_algorithm_not_supported() {
+        let token = Encoded::from_str(
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
+             eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
+        )
+        .unwrap();
 
-    //     let _ = Decoded::<PrivateClaims, ()>::decode_with_jwks(token, &jwks, None).unwrap();
-    // }
+        let jwks: JWKSet = serde_json::from_str(
+            r#"{
+            "keys": [
+                {
+                    "kty": "oct",
+                    "use": "sig",
+                    "kid": "key0",
+                    "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY",
+                    "alg": "A128CBC-HS256"
+                }
+            ]
+        }"#,
+        )
+        .unwrap();
 
-    // #[test]
-    // #[should_panic(expected = "KidMissing")]
-    // fn compact_jws_decode_with_jwks_kid_missing() {
-    //     let token = Encoded::from_str(
-    //         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.\
-    //          eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-    //          QhdrScTpNXF2d0RbG_UTWu2gPKZfzANj6XC4uh-wOoU",
-    //     )
-    //     .unwrap();
+        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+    }
 
-    //     let jwks: JWKSet<()> = serde_json::from_str(
-    //         r#"{
-    //         "keys": [
-    //                     {
-    //                         "kty": "oct",
-    //                         "use": "sig",
-    //                         "kid": "key0",
-    //                         "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY",
-    //                         "alg": "HS256"
-    //                     }
-    //         ]
-    //     }"#,
-    //     )
-    //     .unwrap();
+    #[test]
+    #[should_panic(expected = "UnsupportedKeyAlgorithm")]
+    fn compact_jws_decode_with_jwks_key_type_not_supported() {
+        let token = Encoded::from_str(
+            "eyJhbGciOiAiRVMyNTYiLCJ0eXAiOiAiSldUIiwia2lkIjogImtleTAifQ.\
+             eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
+        )
+        .unwrap();
 
-    //     let _ = Decoded::<PrivateClaims, ()>::decode_with_jwks(token, &jwks, None).unwrap();
-    // }
+        let jwks: JWKSet = serde_json::from_str(
+            r#"{
+            "keys": [
+                {
+                    "kty": "EC",
+                    "d": "oEMWfLRjrJdYa8OdfNz2_X2UrTet1Lnu2fIdlq7-Qd8",
+                    "use": "sig",
+                    "crv": "P-256",
+                    "kid": "key0",
+                    "x": "ZnXv09eyorTiF0AdN6HW-kltr0tt0GbgmD2_VGGlapI",
+                    "y": "vERyG9Enhy8pEZ6V_pomH8aGjO7cINteCmnV5B9y0f0",
+                    "alg": "ES256"
+                }
+            ]
+        }"#,
+        )
+        .unwrap();
 
-    // #[test]
-    // #[should_panic(expected = "UnsupportedKeyAlgorithm")]
-    // fn compact_jws_decode_with_jwks_algorithm_not_supported() {
-    //     let token = Encoded::from_str(
-    //         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
-    //          eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-    //          nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-    //     )
-    //     .unwrap();
-
-    //     let jwks: JWKSet<()> = serde_json::from_str(
-    //         r#"{
-    //         "keys": [
-    //                     {
-    //                         "kty": "oct",
-    //                         "use": "sig",
-    //                         "kid": "key0",
-    //                         "k": "-clnNQnBupZt23N8McUcZytLhan9OmjlJXmqS7daoeY",
-    //                         "alg": "A128CBC-HS256"
-    //                     }
-    //         ]
-    //     }"#,
-    //     )
-    //     .unwrap();
-
-    //     let _ = Decoded::<PrivateClaims, ()>::decode_with_jwks(token, &jwks, None).unwrap();
-    // }
-
-    // #[test]
-    // #[should_panic(expected = "UnsupportedKeyAlgorithm")]
-    // fn compact_jws_decode_with_jwks_key_type_not_supported() {
-    //     let token = Encoded::from_str(
-    //         "eyJhbGciOiAiRVMyNTYiLCJ0eXAiOiAiSldUIiwia2lkIjogImtleTAifQ.\
-    //          eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-    //          nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-    //     )
-    //     .unwrap();
-
-    //     let jwks: JWKSet<()> = serde_json::from_str(
-    //         r#"{
-    //         "keys": [
-    //             {
-    //                 "kty": "EC",
-    //                 "d": "oEMWfLRjrJdYa8OdfNz2_X2UrTet1Lnu2fIdlq7-Qd8",
-    //                 "use": "sig",
-    //                 "crv": "P-256",
-    //                 "kid": "key0",
-    //                 "x": "ZnXv09eyorTiF0AdN6HW-kltr0tt0GbgmD2_VGGlapI",
-    //                 "y": "vERyG9Enhy8pEZ6V_pomH8aGjO7cINteCmnV5B9y0f0",
-    //                 "alg": "ES256"
-    //             }
-    //         ]
-    //     }"#,
-    //     )
-    //     .unwrap();
-
-    //     let _ = Decoded::<PrivateClaims, ()>::decode_with_jwks(token, &jwks, None).unwrap();
-    // }
+        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+    }
 }

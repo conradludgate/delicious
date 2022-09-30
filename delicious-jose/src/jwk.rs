@@ -10,6 +10,22 @@ use crate::jwa::Algorithm;
 use crate::jws;
 use crate::serde_custom;
 
+pub trait Key {
+    fn get(jwk: &Specified) -> Result<&Self, Error>;
+}
+
+impl Key for OctetKey {
+    fn get(jwk: &Specified) -> Result<&Self, Error> {
+        jwk.octet_key()
+    }
+}
+
+impl Key for EllipticCurveKeyParameters {
+    fn get(jwk: &Specified) -> Result<&Self, Error> {
+        jwk.algorithm.ec()
+    }
+}
+
 /// Type of Key as specified in RFC 7518.
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Copy, Clone)]
 pub enum KeyType {
@@ -265,6 +281,17 @@ impl AlgorithmParameters {
         match *self {
             AlgorithmParameters::OctetKey(ref oct) => Ok(oct),
             _ => Err(unexpected_key_type_error!(KeyType::Octet, self.key_type())),
+        }
+    }
+
+    /// Return the byte sequence of an octet key
+    fn ec(&self) -> Result<&EllipticCurveKeyParameters, Error> {
+        match *self {
+            AlgorithmParameters::EllipticCurve(ref ec) => Ok(ec),
+            _ => Err(unexpected_key_type_error!(
+                KeyType::EllipticCurve,
+                self.key_type()
+            )),
         }
     }
 
@@ -673,7 +700,7 @@ impl Default for EllipticCurve {
 /// The members of the object represent properties of the key, including its value.
 /// Type `T` is a struct representing additional JWK properties
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct JWK<T> {
+pub struct JWK<T = ()> {
     /// The specified components in the JWK spec
     #[serde(flatten)]
     pub specified: Specified,
@@ -728,7 +755,7 @@ impl Specified {
 
 /// A JSON object that represents a set of JWKs.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct JWKSet<T> {
+pub struct JWKSet<T = ()> {
     /// Containted JWKs
     pub keys: Vec<JWK<T>>,
 }

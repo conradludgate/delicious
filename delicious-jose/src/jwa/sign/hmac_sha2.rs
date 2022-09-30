@@ -51,11 +51,7 @@ macro_rules! hmac_sha {
                     .to_vec())
             }
 
-            fn verify(
-                key: &Self::Key,
-                data: &[u8],
-                signature: &[u8],
-            ) -> Result<(), Error> {
+            fn verify(key: &Self::Key, data: &[u8], signature: &[u8]) -> Result<(), Error> {
                 Hmac::<$sha>::new_from_slice(key.as_bytes())?
                     .chain_update(data)
                     .verify_slice(signature)
