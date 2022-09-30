@@ -22,8 +22,6 @@ pub enum Error {
     Utf8(str::Utf8Error),
     /// Errors related to IO
     IOError(io::Error),
-    /// Key was rejected by Ring
-    KeyRejected(ring::error::KeyRejected),
 
     /// Wrong key type was provided for the cryptographic operation
     WrongKeyType {
@@ -114,7 +112,7 @@ impl_from_error!(str::Utf8Error, Error::Utf8);
 impl_from_error!(ValidationError, Error::ValidationError);
 impl_from_error!(DecodeError, Error::DecodeError);
 impl_from_error!(io::Error, Error::IOError);
-impl_from_error!(ring::error::KeyRejected, Error::KeyRejected);
+// impl_from_error!(ring::error::KeyRejected, Error::KeyRejected);
 
 impl From<crypto_common::InvalidLength> for Error {
     fn from(_: crypto_common::InvalidLength) -> Self {
@@ -122,11 +120,11 @@ impl From<crypto_common::InvalidLength> for Error {
     }
 }
 
-impl From<ring::error::Unspecified> for Error {
-    fn from(_: ring::error::Unspecified) -> Self {
-        Error::UnspecifiedCryptographicError
-    }
-}
+// impl From<ring::error::Unspecified> for Error {
+//     fn from(_: ring::error::Unspecified) -> Self {
+//         Error::UnspecifiedCryptographicError
+//     }
+// }
 
 impl From<::hmac::digest::MacError> for Error {
     fn from(_: ::hmac::digest::MacError) -> Self {
@@ -173,7 +171,7 @@ impl fmt::Display for Error {
             DecodeError(ref err) => fmt::Display::fmt(err, f),
             ValidationError(ref err) => fmt::Display::fmt(err, f),
             IOError(ref err) => fmt::Display::fmt(err, f),
-            KeyRejected(ref err) => fmt::Display::fmt(err, f),
+            // KeyRejected(ref err) => fmt::Display::fmt(err, f),
             WrongKeyType {
                 ref actual,
                 ref expected,

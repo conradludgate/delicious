@@ -103,7 +103,7 @@ pub mod jwe;
 pub mod jwk;
 pub mod jws;
 
-pub mod digest;
+// pub mod digest;
 
 use crate::errors::{Error, ValidationError};
 
