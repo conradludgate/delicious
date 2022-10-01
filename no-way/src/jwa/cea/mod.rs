@@ -69,6 +69,8 @@ pub enum Algorithm {
 }
 
 impl Algorithm {
+    /// Turn this content-encryption algorithm into it's
+    /// well-known `enc` header name
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::A128CBC_HS256 => "A128CBC-HS256",

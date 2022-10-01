@@ -79,7 +79,7 @@ impl<T, H> fmt::Display for Encoded<T, H> {
         for chunk in self.signature.chunks(1024 / 4 * 3) {
             let n = base64::encode_config_slice(chunk, base64::URL_SAFE_NO_PAD, &mut buf);
             let s = unsafe { std::str::from_utf8_unchecked(&buf[..n]) };
-            f.write_str(s)?
+            f.write_str(s)?;
         }
         Ok(())
     }
@@ -198,9 +198,9 @@ where
         let signature = Sign::sign(key, payload_base64.as_bytes())?;
 
         Ok(Encoded {
-            payload_base64,
             header,
             payload,
+            payload_base64,
             signature,
         })
     }
@@ -268,7 +268,7 @@ where
             return Err(ValidationError::WrongAlgorithmHeader.into());
         }
 
-        let key = <Sign::Key as jwk::Key>::get(&jwk.specified)?;
+        let key = <Sign::Key as jwk::Key>::from(&jwk.specified)?;
         Sign::verify(key, payload_base64.as_bytes(), &signature)?;
 
         Ok(Self::new_with_header(payload, header.private))
@@ -453,8 +453,7 @@ mod tests {
                    kqZMEA";
 
         let token = Encoded::from_str(jwt).unwrap();
-        let _ = Decoded::<ClaimsSet<serde_json::Value>>::decode::<sign::ES256>(token, &public_key)
-            .unwrap();
+        Decoded::<ClaimsSet<serde_json::Value>>::decode::<sign::ES256>(token, &public_key).unwrap();
     }
 
     #[test]
@@ -495,7 +494,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "PartsLengthError { expected: 3, actual: 1 }")]
     fn compact_jws_decode_token_missing_parts() {
-        let _ = Encoded::<()>::from_str("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9").unwrap();
+        Encoded::<()>::from_str("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9").unwrap();
     }
 
     #[test]
@@ -508,7 +507,7 @@ mod tests {
         )
         .unwrap();
         let key = OctetKey::new("secret".to_string().into_bytes());
-        let _ = Decoded::<PrivateClaims>::decode::<sign::HS256>(token, &key).unwrap();
+        Decoded::<PrivateClaims>::decode::<sign::HS256>(token, &key).unwrap();
     }
 
     // #[test]
@@ -537,7 +536,7 @@ mod tests {
         .unwrap();
 
         let key = OctetKey::new("secret".to_string().into_bytes());
-        let _ = Decoded::<PrivateClaims>::decode::<sign::HS256>(token, &key).unwrap();
+        Decoded::<PrivateClaims>::decode::<sign::HS256>(token, &key).unwrap();
     }
 
     #[test]
@@ -585,7 +584,7 @@ mod tests {
         )
         .unwrap();
 
-        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
     }
 
     /// JWK has algorithm and user provided a non-matching expected algorithm
@@ -614,7 +613,7 @@ mod tests {
         )
         .unwrap();
 
-        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::ES256>(token, &jwks).unwrap();
+        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::ES256>(token, &jwks).unwrap();
     }
 
     /// JWK has no algorithm and user provided a header matching expected algorithm
@@ -641,7 +640,7 @@ mod tests {
         )
         .unwrap();
 
-        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
     }
 
     /// JWK has no algorithm and user provided a header not-matching expected algorithm
@@ -669,7 +668,7 @@ mod tests {
         )
         .unwrap();
 
-        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::ES256>(token, &jwks).unwrap();
+        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::ES256>(token, &jwks).unwrap();
     }
 
     // #[test]
@@ -701,13 +700,13 @@ mod tests {
     //     )
     //     .unwrap();
 
-    //     let _ = Decoded::<PrivateClaims>::decode_with_jwks(token, &jwks, None).unwrap();
+    //     Decoded::<PrivateClaims>::decode_with_jwks(token, &jwks, None).unwrap();
     // }
 
     #[test]
     #[should_panic(expected = "PartsLengthError { expected: 3, actual: 2 }")]
     fn compact_jws_decode_with_jwks_missing_parts() {
-        let _ = Encoded::<()>::from_str(
+        Encoded::<()>::from_str(
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ",
         )
@@ -739,7 +738,7 @@ mod tests {
         )
         .unwrap();
 
-        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
     }
 
     #[test]
@@ -767,7 +766,7 @@ mod tests {
         )
         .unwrap();
 
-        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
     }
 
     #[test]
@@ -795,7 +794,7 @@ mod tests {
         )
         .unwrap();
 
-        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
     }
 
     #[test]
@@ -826,6 +825,6 @@ mod tests {
         )
         .unwrap();
 
-        let _ = Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
     }
 }

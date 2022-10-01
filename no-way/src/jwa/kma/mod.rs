@@ -273,6 +273,8 @@ mod serde_impl {
     }
 
     impl Algorithm {
+        /// Turn this key-management algorithm into it's
+        /// well-known `alg` header name
         pub fn as_str(&self) -> &'static str {
             match *self {
                 Algorithm::RSA1_5 => "RSA1_5",

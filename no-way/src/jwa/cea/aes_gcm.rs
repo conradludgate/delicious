@@ -132,10 +132,10 @@ aes_gcm!(A192GCM, aes::Aes192, 192 / 8);
 aes_gcm!(A256GCM, aes::Aes256, 256 / 8);
 
 fn from_slice<Size: ArrayLength<u8>>(x: &[u8]) -> Result<&GenericArray<u8, Size>, Error> {
-    if x.len() != Size::to_usize() {
-        Err(Error::UnspecifiedCryptographicError)
-    } else {
+    if x.len() == Size::to_usize() {
         Ok(GenericArray::from_slice(x))
+    } else {
+        Err(Error::UnspecifiedCryptographicError)
     }
 }
 

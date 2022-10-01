@@ -29,53 +29,8 @@ impl From<Pbes2Algorithm> for super::Algorithm {
     }
 }
 
-impl Pbes2Algorithm {
-    pub fn encrypt(
-        self,
-        payload: &[u8],
-        key: &[u8],
-        salt: &str,
-        count: u32,
-    ) -> Result<Vec<u8>, Error> {
-        use Pbes2Algorithm::{HS256_A128KW, HS384_A192KW, HS512_A256KW};
-
-        let cek = OctetKey::new(payload.to_vec());
-        let key = OctetKey::new(key.to_vec());
-        let header = Pbes2Header {
-            count,
-            salt: base64::decode_config(salt, base64::URL_SAFE_NO_PAD)?,
-        };
-        Ok(match self {
-            HS256_A128KW => PBES2_HS256_A128KW::wrap(&cek, &key, header)?.0,
-            HS384_A192KW => PBES2_HS384_A192KW::wrap(&cek, &key, header)?.0,
-            HS512_A256KW => PBES2_HS512_A256KW::wrap(&cek, &key, header)?.0,
-        })
-    }
-
-    pub fn decrypt(
-        self,
-        encrypted: &[u8],
-        key: &[u8],
-        salt: &str,
-        count: u32,
-    ) -> Result<Vec<u8>, Error> {
-        use Pbes2Algorithm::{HS256_A128KW, HS384_A192KW, HS512_A256KW};
-
-        let key = OctetKey::new(key.to_vec());
-        let header = Pbes2Header {
-            count,
-            salt: base64::decode_config(salt, base64::URL_SAFE_NO_PAD)?,
-        };
-        Ok(match self {
-            HS256_A128KW => PBES2_HS256_A128KW::unwrap(encrypted, &key, header)?.value,
-            HS384_A192KW => PBES2_HS384_A192KW::unwrap(encrypted, &key, header)?.value,
-            HS512_A256KW => PBES2_HS512_A256KW::unwrap(encrypted, &key, header)?.value,
-        })
-    }
-}
-
-const AES_KW_IV: u64 = 0xA6A6A6A6A6A6A6A6_u64;
-/// AES key wrap in-place (https://www.rfc-editor.org/rfc/rfc3394#section-2.2.1)
+const AES_KW_IV: u64 = 0xA6A6_A6A6_A6A6_A6A6_u64;
+/// AES key wrap in-place (<https://www.rfc-editor.org/rfc/rfc3394#section-2.2.1>)
 ///
 /// Implementation is intended for AES128/AES192/AES256 and will likely fail on any other ciphers
 fn aes_key_wrap<T: BlockSizeUser + BlockEncryptMut>(mut cipher: T, out: &mut [u8]) {
@@ -108,14 +63,14 @@ fn aes_key_wrap<T: BlockSizeUser + BlockEncryptMut>(mut cipher: T, out: &mut [u8
             // R[i] = LSB(64, B)
             let lsb = block_size / 8;
             let lsb = lsb - 1..lsb;
-            ri.copy_from_slice(bytemuck::cast_slice(&out2[lsb]))
+            ri.copy_from_slice(bytemuck::cast_slice(&out2[lsb]));
         }
     }
     // Set C[0] = A
     out[..8].copy_from_slice(&a.to_be_bytes());
 }
 
-/// AES key unwrap in-place (https://www.rfc-editor.org/rfc/rfc3394#section-2.2.2)
+/// AES key unwrap in-place (<https://www.rfc-editor.org/rfc/rfc3394#section-2.2.2>)
 ///
 /// Implementation is intended for AES128/AES192/AES256 and will likely fail on any other ciphers
 fn aes_key_unwrap<T: BlockSizeUser + BlockDecryptMut>(
@@ -151,7 +106,7 @@ fn aes_key_unwrap<T: BlockSizeUser + BlockDecryptMut>(
             // R[i] = LSB(64, B)
             let lsb = block_size / 8;
             let lsb = lsb - 1..lsb;
-            ri.copy_from_slice(bytemuck::cast_slice(&out2[lsb]))
+            ri.copy_from_slice(bytemuck::cast_slice(&out2[lsb]));
         }
     }
     if a != AES_KW_IV {
@@ -452,40 +407,6 @@ mod tests {
     #[test]
     // https://www.rfc-editor.org/rfc/rfc7517.html#appendix-C.2
     fn pbes2_hs256_a128kw() {
-        let payload = [
-            111, 27, 25, 52, 66, 29, 20, 78, 92, 176, 56, 240, 65, 208, 82, 112, 161, 131, 36, 55,
-            202, 236, 185, 172, 129, 23, 153, 194, 195, 48, 253, 182,
-        ];
-        let key = b"Thus from my lips, by yours, my sin is purged.";
-        let salt = base64::encode_config(
-            [
-                217, 96, 147, 112, 150, 117, 70, 247, 127, 8, 155, 137, 174, 42, 80, 215,
-            ],
-            base64::URL_SAFE_NO_PAD,
-        );
-        let encrypted_cek = Pbes2Algorithm::HS256_A128KW
-            .encrypt(&payload, key, &salt, 4096)
-            .unwrap();
-
-        assert_eq!(
-            encrypted_cek,
-            [
-                78, 186, 151, 59, 11, 141, 81, 240, 213, 245, 83, 211, 53, 188, 134, 188, 66, 125,
-                36, 200, 222, 124, 5, 103, 249, 52, 117, 184, 140, 81, 246, 158, 161, 177, 20, 33,
-                245, 57, 59, 4
-            ]
-        );
-
-        let decrypted_cek = Pbes2Algorithm::HS256_A128KW
-            .decrypt(&encrypted_cek, key, &salt, 4096)
-            .unwrap();
-
-        assert_eq!(decrypted_cek, payload);
-    }
-
-    #[test]
-    // https://www.rfc-editor.org/rfc/rfc7517.html#appendix-C.2
-    fn pbes2_hs256_a128kw_generic() {
         let payload = OctetKey::new(
             [
                 111, 27, 25, 52, 66, 29, 20, 78, 92, 176, 56, 240, 65, 208, 82, 112, 161, 131, 36,
@@ -506,23 +427,23 @@ mod tests {
             59, 4,
         ];
 
-        kma_round_trip::<PBES2_HS256_A128KW>(payload, &key, header, &expected);
+        kma_round_trip::<PBES2_HS256_A128KW>(&payload, &key, header, &expected);
     }
 
     fn kma_round_trip<K: KMA>(
-        payload: K::Cek,
+        payload: &K::Cek,
         key: &K::Key,
         settings: K::WrapSettings,
         expected: &[u8],
     ) where
         K::Cek: PartialEq + std::fmt::Debug,
     {
-        let (encrypted_cek, header) = K::wrap(&payload, key, settings).unwrap();
+        let (encrypted_cek, header) = K::wrap(payload, key, settings).unwrap();
 
         assert_eq!(encrypted_cek, expected);
 
         let decrypted_cek = K::unwrap(&encrypted_cek, key, header).unwrap();
 
-        assert_eq!(decrypted_cek, payload);
+        assert_eq!(decrypted_cek, *payload);
     }
 }

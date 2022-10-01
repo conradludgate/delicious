@@ -93,7 +93,7 @@ mod tests {
 
     use super::*;
 
-    /// Test from https://www.rfc-editor.org/rfc/rfc7515#appendix-A.3
+    /// Test from <https://www.rfc-editor.org/rfc/rfc7515#appendix-A.3>
     #[test]
     fn es256() {
         let key = EllipticCurveKeyParameters {
@@ -119,7 +119,7 @@ mod tests {
         ES256::verify(&key, input.as_bytes(), &output).unwrap();
     }
 
-    /// Test case from https://github.com/briansmith/ring/blob/a13b8e2/src/ec/suite_b/ecdsa_verify_fixed_tests.txt
+    /// Test case from <https://github.com/briansmith/ring/blob/a13b8e2/src/ec/suite_b/ecdsa_verify_fixed_tests.txt>
     #[test]
     fn verify_es256() {
         let payload_bytes = Vec::<u8>::new();
@@ -137,7 +137,7 @@ mod tests {
         ES256::verify(&pub_key, &payload_bytes, signature.as_slice()).unwrap();
     }
 
-    /// Test case from https://github.com/briansmith/ring/blob/a13b8e2/src/ec/suite_b/ecdsa_verify_fixed_tests.txt
+    /// Test case from <https://github.com/briansmith/ring/blob/a13b8e2/src/ec/suite_b/ecdsa_verify_fixed_tests.txt>
     #[test]
     fn verify_es384() {
         let payload_bytes = Vec::<u8>::new();

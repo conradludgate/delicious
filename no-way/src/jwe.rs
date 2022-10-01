@@ -221,6 +221,9 @@ impl From<RegisteredHeader> for Header<(), ()> {
     }
 }
 
+/// A Rust representation of an **encrypted** JWE.
+///
+/// Can be parsed from a string in it's compact representation
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Encrypted<KMA: kma::KMA, H = ()> {
     header: Header<KMA::Header, H>,
@@ -295,7 +298,7 @@ impl<KMA: kma::KMA, H> fmt::Display for Encrypted<KMA, H> {
             for chunk in part.chunks(1024 / 4 * 3) {
                 let n = base64::encode_config_slice(chunk, base64::URL_SAFE_NO_PAD, &mut buf);
                 let s = unsafe { std::str::from_utf8_unchecked(&buf[..n]) };
-                f.write_str(s)?
+                f.write_str(s)?;
             }
         }
         Ok(())
@@ -318,7 +321,7 @@ where
                     expected: 5,
                     actual: i,
                 },
-            ))?
+            ))?;
         }
         let rest = split.count();
         if rest > 0 {
@@ -390,7 +393,7 @@ where
 
         // Decompression is not supported at the moment
         if header.registered.compression_algorithm.is_some() {
-            Err(Error::UnsupportedOperation)?
+            return Err(Error::UnsupportedOperation);
         }
 
         let payload = T::from_bytes(&payload)?;
@@ -832,7 +835,7 @@ mod tests {
         // reparse it as a A128GCMKW jwe
         let encrypted_jwe: Encrypted<kma::A128GCMKW> = encrypted_jwe.to_string().parse().unwrap();
 
-        let _ = encrypted_jwe
+        encrypted_jwe
             .decrypt::<Vec<u8>, cea::A256GCM>(&key)
             .unwrap();
     }
@@ -853,7 +856,7 @@ mod tests {
             .encrypt::<cea::A256GCM, kma::A256GCMKW>(&key, cek_nonce)
             .unwrap();
 
-        let _ = encrypted_jwe
+        encrypted_jwe
             .decrypt::<Vec<u8>, cea::A128GCM>(&key)
             .unwrap();
     }
@@ -861,7 +864,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "PartsLengthError")]
     fn decrypt_with_incorrect_length() {
-        let _: Encrypted<kma::DirectEncryption> = "INVALID".parse().unwrap();
+        let _token: Encrypted<kma::DirectEncryption> = "INVALID".parse().unwrap();
     }
 
     #[test]
@@ -885,7 +888,7 @@ mod tests {
         encrypted_jwe.header_base64 = encrypted_jwe.header.to_base64().unwrap().into_owned();
 
         // Decrypt
-        let _ = encrypted_jwe
+        encrypted_jwe
             .decrypt::<Vec<u8>, cea::A256GCM>(&key)
             .unwrap();
     }
@@ -911,7 +914,8 @@ mod tests {
         encrypted_jwe.header_base64 = encrypted_jwe.header.to_base64().unwrap().into_owned();
 
         // Decrypt
-        let _: Decrypted<Vec<u8>, ()> = encrypted_jwe.decrypt::<_, cea::A256GCM>(&key).unwrap();
+        let _token: Decrypted<Vec<u8>, ()> =
+            encrypted_jwe.decrypt::<_, cea::A256GCM>(&key).unwrap();
     }
 
     #[test]
@@ -934,7 +938,8 @@ mod tests {
         encrypted_jwe.tag = vec![0];
 
         // Decrypt
-        let _: Decrypted<Vec<u8>, ()> = encrypted_jwe.decrypt::<_, cea::A256GCM>(&key).unwrap();
+        let _token: Decrypted<Vec<u8>, ()> =
+            encrypted_jwe.decrypt::<_, cea::A256GCM>(&key).unwrap();
     }
 
     /// This test modifies the header so the tag (aad for the AES GCM) included becomes incorrect
@@ -959,7 +964,8 @@ mod tests {
         encrypted_jwe.header_base64 = encrypted_jwe.header.to_base64().unwrap().into_owned();
 
         // Decrypt
-        let _: Decrypted<Vec<u8>, ()> = encrypted_jwe.decrypt::<_, cea::A256GCM>(&key).unwrap();
+        let _token: Decrypted<Vec<u8>, ()> =
+            encrypted_jwe.decrypt::<_, cea::A256GCM>(&key).unwrap();
     }
 
     /// This test modifies the encrypted cek
@@ -983,7 +989,8 @@ mod tests {
         encrypted_jwe.encrypted_cek = vec![0u8; 256 / 8];
 
         // Decrypt
-        let _: Decrypted<Vec<u8>, ()> = encrypted_jwe.decrypt::<_, cea::A256GCM>(&key).unwrap();
+        let _token: Decrypted<Vec<u8>, ()> =
+            encrypted_jwe.decrypt::<_, cea::A256GCM>(&key).unwrap();
     }
 
     /// This test modifies the encrypted payload
@@ -1007,7 +1014,8 @@ mod tests {
         encrypted_jwe.encrypted_payload = vec![0u8; 32];
 
         // Decrypt
-        let _: Decrypted<Vec<u8>, ()> = encrypted_jwe.decrypt::<_, cea::A256GCM>(&key).unwrap();
+        let _token: Decrypted<Vec<u8>, ()> =
+            encrypted_jwe.decrypt::<_, cea::A256GCM>(&key).unwrap();
     }
 
     /// This test modifies the nonce
@@ -1031,6 +1039,7 @@ mod tests {
         encrypted_jwe.iv = vec![0u8; 96 / 8];
 
         // Decrypt
-        let _: Decrypted<Vec<u8>, ()> = encrypted_jwe.decrypt::<_, cea::A256GCM>(&key).unwrap();
+        let _token: Decrypted<Vec<u8>, ()> =
+            encrypted_jwe.decrypt::<_, cea::A256GCM>(&key).unwrap();
     }
 }

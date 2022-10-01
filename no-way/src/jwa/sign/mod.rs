@@ -9,13 +9,25 @@ mod hmac_sha2;
 pub use self::ecdsa::{Ecdsa, ES256, ES384};
 pub use hmac_sha2::{HmacSha, HS256, HS384, HS512};
 
+/// [Cryptographic Algorithms for Digital Signatures and MACs](https://www.rfc-editor.org/rfc/rfc7518#section-3)
 pub trait Sign {
+    /// The name specified in the `alg` header.
     const ALG: Algorithm;
+
+    /// The key type that can be used to sign/verify the payload
     type Key;
+
+    /// Sign a payload using the key, returns the signature.
     fn sign(key: &Self::Key, data: &[u8]) -> Result<Vec<u8>, Error>;
+
+    /// Verifies the payload against the signature.
+    /// Returns an error if the signature is invalid
     fn verify(key: &Self::Key, data: &[u8], signature: &[u8]) -> Result<(), Error>;
 }
 
+/// The none-signing algorithm. You probably don't want to use this in production
+/// 
+/// Your tokens will not be signed, and there will be no data integrity
 pub struct None;
 
 impl Sign for None {
@@ -78,6 +90,8 @@ impl Default for Algorithm {
 }
 
 impl Algorithm {
+    /// Turn this signature algorithm into it's
+    /// well-known `alg` header name
     pub fn as_str(&self) -> &'static str {
         match self {
             Algorithm::None => "none",
@@ -357,24 +371,6 @@ impl Algorithm {
 
 //     /// This signature is non-deterministic.
 //     #[test]
-//     fn sign_and_verify_es256_round_trip() {
-//         let private_key =
-//             Secret::ecdsa_keypair_from_file(Algorithm::ES256, "test/fixtures/ecdsa_private_key.p8")
-//                 .unwrap();
-//         let payload = "payload".to_string();
-//         let payload_bytes = payload.as_bytes();
-
-//         let actual_signature = Algorithm::ES256.sign(payload_bytes, &private_key).unwrap();
-
-//         let public_key =
-//             Secret::public_key_from_file("test/fixtures/ecdsa_public_key.der").unwrap();
-//         Algorithm::ES256
-//             .verify(actual_signature.as_slice(), payload_bytes, &public_key)
-//             .unwrap();
-//     }
-
-//     /// This signature is non-deterministic.
-//     #[test]
 //     fn sign_and_verify_es256_round_trip_with_keypair() {
 //         let key =
 //             Secret::ecdsa_keypair_from_file(Algorithm::ES256, "test/fixtures/ecdsa_private_key.p8")
@@ -386,77 +382,6 @@ impl Algorithm {
 
 //         Algorithm::ES256
 //             .verify(actual_signature.as_slice(), payload_bytes, &key)
-//             .unwrap();
-//     }
-
-//     /// Test case from https://github.com/briansmith/ring/blob/a13b8e2/src/ec/suite_b/ecdsa_verify_fixed_tests.txt
-//     #[test]
-//     fn verify_es256() {
-//         let payload_bytes = Vec::<u8>::new();
-//         let public_key = "0430345FD47EA21A11129BE651B0884BFAC698377611ACC9F689458E13B9ED7D4B9D7599\
-//                           A68DCF125E7F31055CCB374CD04F6D6FD2B217438A63F6F667D50EF2F0";
-//         let public_key = Secret::PublicKey(hex::decode(public_key.as_bytes()).unwrap());
-//         let signature = "341F6779B75E98BB42E01095DD48356CBF9002DC704AC8BD2A8240B88D3796C6555843B1B\
-//                          4E264FE6FFE6E2B705A376C05C09404303FFE5D2711F3E3B3A010A1";
-//         let signature_bytes: Vec<u8> = hex::decode(signature.as_bytes()).unwrap();
-//         Algorithm::ES256
-//             .verify(signature_bytes.as_slice(), &payload_bytes, &public_key)
-//             .unwrap();
-//     }
-
-//     /// Test case from https://github.com/briansmith/ring/blob/a13b8e2/src/ec/suite_b/ecdsa_verify_fixed_tests.txt
-//     #[test]
-//     fn verify_es384() {
-//         let payload_bytes = Vec::<u8>::new();
-//         let public_key = "045C5E788A805C77D34128B8401CB59B2373B8B468336C9318252BF39FD31D2507557987\
-//                           A5180A9435F9FB8EB971C426F1C485170DCB18FB688A257F89387A09FC4C5B8BD4B320616\
-//                           B54A0A7B1D1D7C6A0C59F6DFF78C78AD4E3D6FCA9C9A17B96";
-//         let public_key = Secret::PublicKey(hex::decode(public_key.as_bytes()).unwrap());
-//         let signature = "85AC708D4B0126BAC1F5EEEBDF911409070A286FDDE5649582611B60046DE353761660DD0\
-//                          3903F58B44148F25142EEF8183475EC1F1392F3D6838ABC0C01724709C446888BED7F2CE4\
-//                          642C6839DC18044A2A6AB9DDC960BFAC79F6988E62D452";
-//         let signature_bytes: Vec<u8> = hex::decode(signature.as_bytes()).unwrap();
-//         Algorithm::ES384
-//             .verify(signature_bytes.as_slice(), &payload_bytes, &public_key)
-//             .unwrap();
-//     }
-
-//     #[test]
-//     #[should_panic(expected = "UnsupportedOperation")]
-//     fn verify_es512() {
-//         let payload: Vec<u8> = vec![];
-//         let signature: Vec<u8> = vec![];
-//         let public_key = Secret::PublicKey(vec![]);
-//         Algorithm::ES512
-//             .verify(signature.as_slice(), payload.as_slice(), &public_key)
-//             .unwrap();
-//     }
-
-//     #[test]
-//     #[should_panic(expected = "UnspecifiedCryptographicError")]
-//     fn invalid_none() {
-//         let invalid_signature = "broken".to_string();
-//         let signature_bytes = invalid_signature.as_bytes();
-//         Algorithm::None
-//             .verify(
-//                 signature_bytes,
-//                 "payload".to_string().as_bytes(),
-//                 &Secret::None,
-//             )
-//             .unwrap();
-//     }
-
-//     #[test]
-//     #[should_panic(expected = "UnspecifiedCryptographicError")]
-//     fn invalid_hs256() {
-//         let invalid_signature = "broken".to_string();
-//         let signature_bytes = invalid_signature.as_bytes();
-//         Algorithm::HS256
-//             .verify(
-//                 signature_bytes,
-//                 "payload".to_string().as_bytes(),
-//                 &Secret::Bytes("secret".to_string().into_bytes()),
-//             )
 //             .unwrap();
 //     }
 
@@ -490,18 +415,4 @@ impl Algorithm {
 //             .unwrap();
 //     }
 
-//     #[test]
-//     #[should_panic(expected = "UnspecifiedCryptographicError")]
-//     fn invalid_es256() {
-//         let public_key = Secret::public_key_from_file("test/fixtures/rsa_public_key.der").unwrap();
-//         let invalid_signature = "broken".to_string();
-//         let signature_bytes = invalid_signature.as_bytes();
-//         Algorithm::ES256
-//             .verify(
-//                 signature_bytes,
-//                 "payload".to_string().as_bytes(),
-//                 &public_key,
-//             )
-//             .unwrap();
-//     }
 // }

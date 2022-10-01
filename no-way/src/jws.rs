@@ -26,7 +26,7 @@ pub enum Secret {
     ///
     /// # Examples
     /// ```
-    /// use biscuit::jws::Secret;
+    /// use no_way::jws::Secret;
     ///
     /// let secret = Secret::bytes_from_str("secret");
     /// ```
@@ -53,7 +53,7 @@ pub enum Secret {
     // ///
     // /// # Examples
     // /// ```
-    // /// use biscuit::jws::Secret;
+    // /// use no_way::jws::Secret;
     // ///
     // /// let secret = Secret::rsa_keypair_from_file("test/fixtures/rsa_private_key.der");
     // /// ```
@@ -69,9 +69,9 @@ pub enum Secret {
     // ///
     // /// # Examples
     // /// ```
-    // /// use biscuit::jws::Secret;
+    // /// use no_way::jws::Secret;
     // ///
-    // /// let secret = Secret::ecdsa_keypair_from_file(biscuit::jwa::sign::Algorithm::ES256, "test/fixtures/ecdsa_private_key.p8");
+    // /// let secret = Secret::ecdsa_keypair_from_file(no_way::jwa::sign::Algorithm::ES256, "test/fixtures/ecdsa_private_key.p8");
     // /// ```
     // EcdsaKeyPair(Arc<signature::EcdsaKeyPair>),
     /// Bytes of a DER encoded RSA Public Key
@@ -147,7 +147,7 @@ pub enum Secret {
     ///
     /// # Examples
     /// ```
-    /// use biscuit::jws::Secret;
+    /// use no_way::jws::Secret;
     ///
     /// let secret = Secret::public_key_from_file("test/fixtures/rsa_public_key.der");
     PublicKey(Vec<u8>),
@@ -165,14 +165,7 @@ pub enum Secret {
 
 impl Secret {
     fn read_bytes(path: &str) -> Result<Vec<u8>, Error> {
-        use std::fs::File;
-        use std::io::prelude::*;
-
-        let mut file = File::open(path)?;
-        let metadata = file.metadata()?;
-        let mut bytes: Vec<u8> = Vec::with_capacity(metadata.len() as usize);
-        let _ = file.read_to_end(&mut bytes)?;
-        Ok(bytes)
+        Ok(std::fs::read(path)?)
     }
 
     /// Convenience function to create a secret bytes array from a string

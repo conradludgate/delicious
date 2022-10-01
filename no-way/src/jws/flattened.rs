@@ -44,9 +44,9 @@ fn signing_input(protected_header: &[u8], payload: &[u8]) -> Vec<u8> {
 ///
 /// # Examples
 /// ```
-/// use biscuit::jws::{Header, RegisteredHeader, Signable};
-/// use biscuit::jwa::sign;
-/// use biscuit::();
+/// use no_way::jws::{Header, RegisteredHeader, Signable};
+/// use no_way::jwa::sign;
+/// use no_way::();
 /// let header = Header::<()>::from(RegisteredHeader {
 ///     algorithm: sign::Algorithm::ES256,
 ///     ..Default::default()
@@ -154,9 +154,9 @@ impl SignedData {
     ///
     /// # Example
     /// ```
-    /// use biscuit::jwa::sign::Algorithm;
-    /// use biscuit::jws::{Header, RegisteredHeader, Secret, Signable, SignedData};
-    /// use biscuit::();
+    /// use no_way::jwa::sign::Algorithm;
+    /// use no_way::jws::{Header, RegisteredHeader, Secret, Signable, SignedData};
+    /// use no_way::();
     /// use ring::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair};
     /// use std::sync::Arc;
     ///
@@ -173,7 +173,7 @@ impl SignedData {
     ///     &ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref())?;
     /// let secret = Secret::EcdsaKeyPair(Arc::new(keypair));
     /// let signed = SignedData::sign(data, secret)?;
-    /// # Ok::<(), biscuit::errors::Error>(())
+    /// # Ok::<(), no_way::errors::Error>(())
     /// ```
     pub fn sign(data: Signable, secret: &Secret) -> Result<Self, Error> {
         let signature = data
@@ -210,8 +210,8 @@ impl SignedData {
     ///
     /// # Example
     /// ```
-    /// use biscuit::jwa::sign::Algorithm;
-    /// use biscuit::jws::{Secret, SignedData};
+    /// use no_way::jwa::sign::Algorithm;
+    /// use no_way::jws::{Secret, SignedData};
     /// use data_encoding::HEXUPPER;
     /// let public_key =
     ///     "043727F96AAD416887DD75CC2E333C3D8E06DCDF968B6024579449A2B802EFC891F638C75\
@@ -226,7 +226,7 @@ impl SignedData {
     ///     secret,
     ///     sign::Algorithm::ES256
     /// )?;
-    /// # Ok::<(), biscuit::errors::Error>(())
+    /// # Ok::<(), no_way::errors::Error>(())
     /// ```
     pub fn verify_flattened(
         data: &[u8],

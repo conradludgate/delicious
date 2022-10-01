@@ -1,79 +1,73 @@
-//! A library to work with Javascript Object Signing and Encryption(JOSE),
-//! including JSON Web Tokens (JWT), JSON Web Signature (JWS) and JSON Web Encryption (JWE)
+//! # No Way, Jose!
 //!
-//! ## Installation
-//!
-//! See [`JWT`] for common usage examples.
-//!
-//! ## Supported Features
-//! The crate does not support all, and probably will never support all of
-//! the features described in the various RFCs, including some algorithms and verification.
-//!
-//! ## References
-//! - [JWT Handbook](https://auth0.com/e-books/jwt-handbook) — great introduction to JWT
-//! - [IANA JOSE Registry](https://www.iana.org/assignments/jose/jose.xhtml)
-//!
-//! ### RFCs
-//! - [JSON Web Tokens RFC](https://tools.ietf.org/html/rfc7519)
-//! - [JSON Web Signature RFC](https://tools.ietf.org/html/rfc7515)
-//! - [JSON Web Algorithms RFC](https://tools.ietf.org/html/rfc7518)
-//! - [JSON Web Encryption RFC](https://tools.ietf.org/html/rfc7516)
-//! - [JSON Web Signature (JWS) Unencoded Payload Option](https://tools.ietf.org/html/rfc7797)
-//! - [CFRG Elliptic Curve Diffie-Hellman (ECDH) and Signatures in JOSE](https://tools.ietf.org/html/rfc8037)
-//! - [JWS Unencoded Payload Option](https://tools.ietf.org/html/rfc7797)
-//! - [JWK Thumbprint](https://tools.ietf.org/html/rfc7638)
+//! A library to work with Javascript Object Signing and Encryption (JOSE), including:
+//! * JSON Web Tokens (JWT)
+//! * JSON Web Signature (JWS)
+//! * JSON Web Encryption (JWE)
+//! * JSON Web Algorithms (JWA)
+//! * JSON Web Keys (JWK)
 
+// ### RFCs
+// - [JSON Web Tokens RFC](https://tools.ietf.org/html/rfc7519)
+// - [JSON Web Signature RFC](https://tools.ietf.org/html/rfc7515)
+// - [JSON Web Algorithms RFC](https://tools.ietf.org/html/rfc7518)
+// - [JSON Web Encryption RFC](https://tools.ietf.org/html/rfc7516)
+// - [JSON Web Signature (JWS) Unencoded Payload Option](https://tools.ietf.org/html/rfc7797)
+// - [CFRG Elliptic Curve Diffie-Hellman (ECDH) and Signatures in JOSE](https://tools.ietf.org/html/rfc8037)
+// - [JWS Unencoded Payload Option](https://tools.ietf.org/html/rfc7797)
+// - [JWK Thumbprint](https://tools.ietf.org/html/rfc7638)
+
+#![warn(clippy::pedantic)]
 #![allow(
-    missing_copy_implementations,
-    missing_debug_implementations,
-    unknown_lints
+    clippy::module_name_repetitions,
+    clippy::missing_errors_doc,
+    clippy::must_use_candidate,
+    clippy::default_trait_access,
+    clippy::similar_names,
+    clippy::enum_glob_use,
 )]
-#![allow(
-    clippy::try_err,
-    clippy::needless_doctest_main,
-    clippy::upper_case_acronyms
-)]
-#![deny(
-    arithmetic_overflow,
-    bad_style,
-    const_err,
-    dead_code,
-    improper_ctypes,
-    // missing_docs,
-    mutable_transmutes,
-    no_mangle_const_items,
-    non_camel_case_types,
-    non_shorthand_field_patterns,
-    non_upper_case_globals,
-    overflowing_literals,
-    path_statements,
-    patterns_in_fns_without_body,
-    private_in_public,
-    stable_features,
-    trivial_casts,
-    trivial_numeric_casts,
-    unconditional_recursion,
-    unknown_crate_types,
-    unreachable_code,
-    unused_allocation,
-    unused_assignments,
-    unused_attributes,
-    unused_comparisons,
-    unused_extern_crates,
-    unused_features,
-    unused_import_braces,
-    unused_imports,
-    unused_must_use,
-    unused_mut,
-    unused_parens,
-    unused_qualifications,
-    unused_results,
-    unused_unsafe,
-    unused_variables,
-    variant_size_differences,
-    while_true
-)]
-#![doc(test(attr(allow(unused_variables), deny(warnings))))]
+
+// #![deny(
+//     arithmetic_overflow,
+//     bad_style,
+//     const_err,
+//     dead_code,
+//     improper_ctypes,
+//     missing_docs,
+//     mutable_transmutes,
+//     no_mangle_const_items,
+//     non_camel_case_types,
+//     non_shorthand_field_patterns,
+//     non_upper_case_globals,
+//     overflowing_literals,
+//     path_statements,
+//     patterns_in_fns_without_body,
+//     private_in_public,
+//     stable_features,
+//     trivial_casts,
+//     trivial_numeric_casts,
+//     unconditional_recursion,
+//     unknown_crate_types,
+//     unreachable_code,
+//     unused_allocation,
+//     unused_assignments,
+//     unused_attributes,
+//     unused_comparisons,
+//     unused_extern_crates,
+//     unused_features,
+//     unused_import_braces,
+//     unused_imports,
+//     unused_must_use,
+//     unused_mut,
+//     unused_parens,
+//     unused_qualifications,
+//     unused_results,
+//     unused_unsafe,
+//     unused_variables,
+//     variant_size_differences,
+//     while_true
+// )]
+// #![doc(test(attr(allow(unused_variables), deny(warnings))))]
 
 use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
@@ -107,18 +101,27 @@ pub mod jws;
 
 use crate::errors::{Error, ValidationError};
 
+/// A trait to describe how to parse components of a compact form JWS or JWE
 pub trait CompactPart: Sized {
+    /// Try and parse raw bytes into Self
     fn from_bytes(b: &[u8]) -> Result<Self, Error>;
+
+    /// Try and parse a url-safe base64 encoded string
     fn from_base64(b: &str) -> Result<Self, Error> {
         let bytes = base64::decode_config(b, base64::URL_SAFE_NO_PAD)?;
         Self::from_bytes(&bytes)
     }
+
+    /// Convert self into raw bytes
     fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error>;
+
+    /// Convert self into a url-safe base64 encoded string
     fn to_base64(&self) -> Result<Cow<'_, str>, Error> {
         Ok(base64::encode_config(self.to_bytes()?, base64::URL_SAFE_NO_PAD).into())
     }
 }
 
+/// A [`CompactPart`] type that parses data as json using [`serde_json`]
 pub struct Json<T>(pub T);
 
 impl<T: Serialize + DeserializeOwned> CompactPart for Json<T> {
@@ -172,12 +175,8 @@ impl CompactPart for () {
 /// ## Encoding and decoding with HS256
 ///
 /// ```
-/// use biscuit::*;
-/// use biscuit::jws::*;
-/// use biscuit::jwa::*;
+/// use no_way::{JWT, jwa, jws, jwk, ClaimsSet, RegisteredClaims};
 /// use serde::{Serialize, Deserialize};
-///
-/// # fn main() {
 ///
 /// // Define our own private claims
 /// #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -186,7 +185,7 @@ impl CompactPart for () {
 ///     department: String,
 /// }
 ///
-/// let signing_secret = Secret::Bytes("secret".to_string().into_bytes());
+/// let signing_key = jwk::OctetKey::new("secret".to_string().into_bytes());
 ///
 /// let expected_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.\
 ///        eyJpc3MiOiJodHRwczovL3d3dy5hY21lLmNvbS8iLCJzdWIiOiJKb2huIERvZSIsImF1ZCI6Imh0dHBzOi8vYWNtZ\
@@ -195,11 +194,10 @@ impl CompactPart for () {
 ///
 /// let expected_claims = ClaimsSet::<PrivateClaims> {
 ///     registered: RegisteredClaims {
-///         issuer: Some("https://www.acme.com/".to_string()),
+///         issuer: Some("https://www.acme.com/".into()),
 ///         subject: Some("John Doe".to_string()),
-///         audience:
-///             Some(SingleOrMultiple::Single("https://acme-customer.com/".to_string())),
-///         not_before: Some(1234.into()),
+///         audience: Some("https://acme-customer.com/".into()),
+///         not_before: Some(1234.try_into().unwrap()),
 ///         ..Default::default()
 ///     },
 ///     private: PrivateClaims {
@@ -208,26 +206,17 @@ impl CompactPart for () {
 ///     },
 /// };
 ///
-/// let expected_jwt = JWT::new_decoded(From::from(
-///                                         RegisteredHeader {
-///                                             algorithm: SignatureAlgorithm::HS256,
-///                                             ..Default::default()
-///                                         }),
-///                                     expected_claims.clone());
+/// let jwt = JWT::new(expected_claims.clone());
 ///
-/// let token = expected_jwt
-///     .into_encoded(&signing_secret).unwrap();
-/// let token = token.unwrap_encoded().to_string();
+/// let token = jwt.encode::<jwa::sign::HS256>(&signing_key).unwrap().to_string();
 /// assert_eq!(expected_token, token);
 /// // Now, send `token` to your clients
 ///
 /// // ... some time later, we get token back!
 ///
-/// let token = JWT::<_, biscuit::()>::new_encoded(&token);
-/// let token = token.into_decoded(&signing_secret,
-///     SignatureAlgorithm::HS256).unwrap();
-/// assert_eq!(*token.payload().unwrap(), expected_claims);
-/// # }
+/// let encoded_token: jws::Encoded<ClaimsSet::<PrivateClaims>> = token.parse().unwrap();
+/// let token = JWT::<_>::decode::<jwa::sign::HS256>(encoded_token, &signing_key).unwrap();
+/// assert_eq!(token.payload, expected_claims);
 /// ```
 pub type JWT<T> = jws::Decoded<ClaimsSet<T>, ()>;
 
@@ -236,7 +225,7 @@ pub type JWT<T> = jws::Decoded<ClaimsSet<T>, ()>;
 /// Type `T` is the type of private claims for the encapsulated JWT, and type `H` is the type of the private
 /// header fields of the encapsulated JWT. Type `I` is the private header fields fo the encapsulating JWE.
 ///
-/// Usually, you would set `H` and `I` to `biscuit::()` because you usually do not need any private header fields.
+/// Usually, you would set `H` and `I` to `no_way::()` because you usually do not need any private header fields.
 ///
 /// In general, you should [sign a JWT claims set, then encrypt it](http://crypto.stackexchange.com/a/5466),
 /// although there is nothing stopping you from doing it the other way round.
@@ -245,13 +234,10 @@ pub type JWT<T> = jws::Decoded<ClaimsSet<T>, ()>;
 /// ## Sign with HS256, then encrypt with A256GCMKW and A256GCM
 ///
 /// ```rust
-/// use std::str::FromStr;
-/// use biscuit::{ClaimsSet, RegisteredClaims, (), SingleOrMultiple, JWT, JWE};
-/// use biscuit::jwk::JWK;
-/// use biscuit::jws::{self, Secret};
-/// use biscuit::jwe;
-/// use biscuit::jwa::{EncryptionOptions, SignatureAlgorithm, KeyManagementAlgorithm,
-///                    ContentEncryptionAlgorithm};
+/// use no_way::{ClaimsSet, RegisteredClaims, JWT, JWE};
+/// use no_way::jwk;
+/// use no_way::jwe::Encrypted;
+/// use no_way::jwa::{kma, cea, sign};
 /// use serde::{Serialize, Deserialize};
 ///
 /// // Define our own private claims
@@ -261,17 +247,13 @@ pub type JWT<T> = jws::Decoded<ClaimsSet<T>, ()>;
 ///     department: String,
 /// }
 ///
-/// #[allow(unused_assignments)]
-/// # fn main() {
 /// // Craft our JWS
 /// let expected_claims = ClaimsSet::<PrivateClaims> {
 ///     registered: RegisteredClaims {
-///         issuer: Some(FromStr::from_str("https://www.acme.com").unwrap()),
-///         subject: Some(FromStr::from_str("John Doe").unwrap()),
-///         audience: Some(SingleOrMultiple::Single(
-///             FromStr::from_str("htts://acme-customer.com").unwrap(),
-///         )),
-///         not_before: Some(1234.into()),
+///         issuer: Some("https://www.acme.com".into()),
+///         subject: Some("John Doe".into()),
+///         audience: Some("htts://acme-customer.com".into()),
+///         not_before: Some(1234.try_into().unwrap()),
 ///         ..Default::default()
 ///     },
 ///     private: PrivateClaims {
@@ -280,80 +262,68 @@ pub type JWT<T> = jws::Decoded<ClaimsSet<T>, ()>;
 ///     },
 /// };
 ///
-/// let expected_jwt = JWT::new_decoded(
-///     From::from(jws::RegisteredHeader {
-///         algorithm: SignatureAlgorithm::HS256,
-///         ..Default::default()
-///     }),
-///     expected_claims.clone(),
-/// );
+/// let expected_jwt = JWT::new(expected_claims.clone());
 ///
-/// let jws = expected_jwt
-///     .into_encoded(&Secret::Bytes("secret".to_string().into_bytes()))
-///     .unwrap();
+/// let signing_key = jwk::OctetKey::new("secret".to_string().into_bytes());
+/// let jws = expected_jwt.encode::<sign::HS256>(&signing_key).unwrap();
 ///
 /// // Encrypt the token
 ///
 /// // You would usually have your own AES key for this, but we will use a zeroed key as an example
-/// let key: JWK<()> = JWK::new_octet_key(&vec![0; 256 / 8], Default::default());
+/// let key = jwk::OctetKey::new(vec![0; 256 / 8]);
 ///
-/// // We need to create an `EncryptionOptions` with a nonce for AES GCM encryption.
-/// // You must take care NOT to reuse the nonce. You can simply treat the nonce as a 96 bit
-/// // counter that is incremented after every use
-/// let mut nonce_counter = num_bigint::BigUint::from_bytes_le(&vec![0; 96 / 8]);
-/// // Make sure it's no more than 96 bits!
-/// assert!(nonce_counter.bits() <= 96);
-/// let mut nonce_bytes = nonce_counter.to_bytes_le();
-/// // We need to ensure it is exactly 96 bits
-/// nonce_bytes.resize(96 / 8, 0);
-/// let options = EncryptionOptions::AES_GCM { nonce: nonce_bytes };
+/// /// We need to create a nonce for AES GCM encryption.
+/// /// You must take care NOT to reuse the nonce.
+/// /// You can simply treat the nonce as a 96 bit
+/// /// counter that is incremented after every use
+/// ///
+/// /// In this case, we're using a 64bit counter + a 32bit random prefix tag
+/// fn generate_nonce() -> Vec<u8> {
+///     # use std::sync::atomic::{AtomicU64, Ordering};
+///     static NONCE: AtomicU64 = AtomicU64::new(0);
+///     // use some lazy random generation so each service has a separate tag
+///     static TAG: u32 = 0xDEADCAFE;
+///
+///     // fetch and increment the nonce counter
+///     let nonce = NONCE.fetch_add(1, Ordering::Release);
+///
+///     // collect the bytes together and return them
+///     let mut output = vec![0; 96/8];
+///     output[0..32/8].copy_from_slice(&TAG.to_be_bytes());
+///     output[32/8..].copy_from_slice(&nonce.to_be_bytes());
+///     output
+/// }
+/// let nonce = generate_nonce();
 ///
 /// // Construct the JWE
-/// let jwe = JWE::new_decrypted(
-///     From::from(jwe::RegisteredHeader {
-///         cek_algorithm: KeyManagementAlgorithm::A256GCMKW,
-///         enc_algorithm: ContentEncryptionAlgorithm::A256GCM,
-///         media_type: Some("JOSE".to_string()),
-///         content_type: Some("JOSE".to_string()),
-///         ..Default::default()
-///     }),
-///     jws.clone(),
-/// );
+/// let jwe = JWE::new(jws.clone());
 ///
 /// // Encrypt
-/// let encrypted_jwe = jwe.encrypt(&key, &options).unwrap();
+/// let encrypted_jwe = jwe.encrypt::<
+///     cea::A256GCM,   // encrypt the contents with AES256 GCM
+///     kma::A256GCMKW, // perform key wrapping with AES256 GCM
+/// >(&key, nonce).unwrap();
 ///
-/// let token = encrypted_jwe.unwrap_encrypted().to_string();
+/// let token = encrypted_jwe.to_string();
 ///
 /// // Now, send `token` to your clients
 ///
 /// // ... some time later, we get token back!
-/// let token: JWE<PrivateClaims, (), ()> = JWE::new_encrypted(&token);
+/// let token: Encrypted<kma::A256GCMKW> = token.parse().unwrap();
 ///
 /// // Decrypt
-/// let decrypted_jwe = token
-///     .into_decrypted(
-///         &key,
-///         KeyManagementAlgorithm::A256GCMKW,
-///         ContentEncryptionAlgorithm::A256GCM,
-///     )
-///     .unwrap();
+/// let decrypted_jwe = token.decrypt::<_, cea::A256GCM>(&key).unwrap();
 ///
-/// let decrypted_jws = decrypted_jwe.payload().unwrap();
-/// assert_eq!(jws, *decrypted_jws);
-///
-/// // Don't forget to increment the nonce!
-/// nonce_counter = nonce_counter + 1u8;
-/// # }
+/// assert_eq!(jws, decrypted_jwe.payload);
 /// ```
-pub type JWE = jwe::Decrypted<jws::Encoded<()>, ()>;
+pub type JWE<T> = jwe::Decrypted<jws::Encoded<ClaimsSet<T>>, ()>;
 
 /// Represents a choice between a single value or multiple values.
 /// This value is serialized by serde [untagged](https://serde.rs/enum-representations.html).
 ///
 /// # Examples
 /// ```
-/// use biscuit::SingleOrMultiple;
+/// use no_way::SingleOrMultiple;
 /// use serde::{Serialize, Deserialize};
 ///
 /// #[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -395,6 +365,27 @@ pub enum SingleOrMultiple<T> {
     Single(T),
     /// Multiple values
     Multiple(Vec<T>),
+}
+
+impl From<&str> for SingleOrMultiple<String> {
+    fn from(t: &str) -> Self {
+        Self::Single(t.to_owned())
+    }
+}
+impl From<&[&str]> for SingleOrMultiple<String> {
+    fn from(t: &[&str]) -> Self {
+        Self::Multiple(t.iter().map(|&s| s.to_owned()).collect())
+    }
+}
+impl<T> From<T> for SingleOrMultiple<T> {
+    fn from(t: T) -> Self {
+        Self::Single(t)
+    }
+}
+impl<T> From<Vec<T>> for SingleOrMultiple<T> {
+    fn from(t: Vec<T>) -> Self {
+        Self::Multiple(t)
+    }
 }
 
 impl<T> SingleOrMultiple<T>
@@ -530,7 +521,7 @@ pub struct ClaimPresenceOptions {
 impl ClaimPresenceOptions {
     /// Returns a `ClaimPresenceOptions` where every claim is required as per [RFC7523](https://tools.ietf.org/html/rfc7523#section-3)
     pub fn strict() -> Self {
-        use crate::Presence::Required;
+        use Presence::Required;
         ClaimPresenceOptions {
             issued_at: Required,
             not_before: Required,
@@ -785,10 +776,7 @@ impl<T: Serialize + DeserializeOwned> CompactPart for ClaimsSet<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::str::{self, FromStr};
-
     use time::Duration;
-
     use super::*;
 
     #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -813,7 +801,7 @@ mod tests {
     #[test]
     fn single_string_serialization_round_trip() {
         let test = SingleOrMultipleStrings {
-            values: SingleOrMultiple::Single("foobar".to_string()),
+            values: "foobar".into(),
         };
         let expected_json = r#"{"values":"foobar"}"#;
 
@@ -829,11 +817,7 @@ mod tests {
     #[test]
     fn multiple_strings_serialization_round_trip() {
         let test = SingleOrMultipleStrings {
-            values: SingleOrMultiple::Multiple(vec![
-                "foo".to_string(),
-                "bar".to_string(),
-                "baz".to_string(),
-            ]),
+            values: ["foo", "bar", "baz"].as_slice().into(),
         };
         let expected_json = r#"{"values":["foo","bar","baz"]}"#;
 
@@ -851,7 +835,7 @@ mod tests {
     #[test]
     fn single_string_or_uri_string_serialization_round_trip() {
         let test = SingleOrMultipleStrings {
-            values: SingleOrMultiple::Single(FromStr::from_str("foobar").unwrap()),
+            values: "foobar".into(),
         };
         let expected_json = r#"{"values":"foobar"}"#;
 
@@ -867,9 +851,7 @@ mod tests {
     #[test]
     fn single_string_or_uri_uri_serialization_round_trip() {
         let test = SingleOrMultipleStrings {
-            values: SingleOrMultiple::Single(
-                FromStr::from_str("https://www.examples.com/").unwrap(),
-            ),
+            values: "https://www.examples.com/".into(),
         };
         let expected_json = r#"{"values":"https://www.examples.com/"}"#;
 
@@ -885,13 +867,15 @@ mod tests {
     #[test]
     fn multiple_string_or_uri_serialization_round_trip() {
         let test = SingleOrMultipleStrings {
-            values: SingleOrMultiple::Multiple(vec![
-                FromStr::from_str("foo").unwrap(),
-                FromStr::from_str("https://www.example.com/").unwrap(),
-                FromStr::from_str("data:text/plain,Hello?World#").unwrap(),
-                FromStr::from_str("http://[::1]/").unwrap(),
-                FromStr::from_str("baz").unwrap(),
-            ]),
+            values: [
+                "foo",
+                "https://www.example.com/",
+                "data:text/plain,Hello?World#",
+                "http://[::1]/",
+                "baz",
+            ]
+            .as_slice()
+            .into(),
         };
         let expected_json = r#"{"values":["foo","https://www.example.com/","data:text/plain,Hello?World#","http://[::1]/","baz"]}"#;
 
@@ -941,10 +925,8 @@ mod tests {
     #[test]
     fn registered_claims_serialization_round_trip() {
         let claim = RegisteredClaims {
-            issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
-            audience: Some(SingleOrMultiple::Single(
-                FromStr::from_str("htts://acme-customer.com/").unwrap(),
-            )),
+            issuer: Some("https://www.acme.com/".into()),
+            audience: Some("htts://acme-customer.com/".into()),
             not_before: Some(1234.try_into().unwrap()),
             ..Default::default()
         };
@@ -962,11 +944,9 @@ mod tests {
     fn claims_set_serialization_round_trip() {
         let claim = ClaimsSet::<PrivateClaims> {
             registered: RegisteredClaims {
-                issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
-                subject: Some(FromStr::from_str("John Doe").unwrap()),
-                audience: Some(SingleOrMultiple::Single(
-                    FromStr::from_str("htts://acme-customer.com/").unwrap(),
-                )),
+                issuer: Some("https://www.acme.com/".into()),
+                subject: Some("John Doe".into()),
+                audience: Some("htts://acme-customer.com/".into()),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },
@@ -992,11 +972,9 @@ mod tests {
     fn duplicate_claims_round_trip() {
         let claim = ClaimsSet::<InvalidPrivateClaim> {
             registered: RegisteredClaims {
-                issuer: Some(FromStr::from_str("https://www.acme.com").unwrap()),
-                subject: Some(FromStr::from_str("John Doe").unwrap()),
-                audience: Some(SingleOrMultiple::Single(
-                    FromStr::from_str("htts://acme-customer.com").unwrap(),
-                )),
+                issuer: Some("https://www.acme.com".into()),
+                subject: Some("John Doe".into()),
+                audience: Some("htts://acme-customer.com".into()),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },
@@ -1018,7 +996,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "MissingRequiredClaims([\"iat\"])")]
     fn validate_times_missing_iat() {
-        let registered_claims: RegisteredClaims = Default::default();
+        let registered_claims = RegisteredClaims::default();
         let options = ClaimPresenceOptions {
             issued_at: Presence::Required,
             ..Default::default()
@@ -1029,7 +1007,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "MissingRequiredClaims([\"exp\"])")]
     fn validate_times_missing_exp() {
-        let registered_claims: RegisteredClaims = Default::default();
+        let registered_claims = RegisteredClaims::default();
         let options = ClaimPresenceOptions {
             expiry: Presence::Required,
             ..Default::default()
@@ -1040,7 +1018,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "MissingRequiredClaims([\"nbf\"])")]
     fn validate_times_missing_nbf() {
-        let registered_claims: RegisteredClaims = Default::default();
+        let registered_claims = RegisteredClaims::default();
         let options = ClaimPresenceOptions {
             not_before: Presence::Required,
             ..Default::default()
@@ -1051,7 +1029,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "MissingRequiredClaims([\"aud\"])")]
     fn validate_times_missing_aud() {
-        let registered_claims: RegisteredClaims = Default::default();
+        let registered_claims = RegisteredClaims::default();
         let options = ClaimPresenceOptions {
             audience: Presence::Required,
             ..Default::default()
@@ -1062,7 +1040,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "MissingRequiredClaims([\"iss\"])")]
     fn validate_times_missing_iss() {
-        let registered_claims: RegisteredClaims = Default::default();
+        let registered_claims = RegisteredClaims::default();
         let options = ClaimPresenceOptions {
             issuer: Presence::Required,
             ..Default::default()
@@ -1073,7 +1051,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "MissingRequiredClaims([\"sub\"])")]
     fn validate_times_missing_sub() {
-        let registered_claims: RegisteredClaims = Default::default();
+        let registered_claims = RegisteredClaims::default();
         let options = ClaimPresenceOptions {
             subject: Presence::Required,
             ..Default::default()
@@ -1086,7 +1064,7 @@ mod tests {
         expected = "MissingRequiredClaims([\"exp\", \"nbf\", \"iat\", \"aud\", \"iss\", \"sub\", \"jti\"])"
     )]
     fn validate_times_missing_all() {
-        let registered_claims: RegisteredClaims = Default::default();
+        let registered_claims = RegisteredClaims::default();
         let options = ClaimPresenceOptions::strict();
         registered_claims.validate_claim_presence(options).unwrap();
     }

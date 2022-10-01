@@ -7,12 +7,12 @@ use hmac::Hmac;
 use super::{Algorithm, EncryptionResult, CEA};
 use crate::{errors::Error, jwk::OctetKey};
 
-/// [Content Encryption with AES_CBC_HMAC_SHA2](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2)
+/// [Content Encryption with `AES_CBC_HMAC_SHA2`](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2)
 ///
 /// See
-/// * [`A128CBC_HS256`] - Content Encryption with AES_128_CBC_HMAC_SHA_256
-/// * [`A192CBC_HS384`] - Content Encryption with AES_192_CBC_HMAC_SHA_384
-/// * [`A256CBC_HS512`] - Content Encryption with AES_256_CBC_HMAC_SHA_512
+/// * [`A128CBC_HS256`] - Content Encryption with `AES_128_CBC_HMAC_SHA_256`
+/// * [`A192CBC_HS384`] - Content Encryption with `AES_192_CBC_HMAC_SHA_384`
+/// * [`A256CBC_HS512`] - Content Encryption with `AES_256_CBC_HMAC_SHA_512`
 pub struct AesCbcHmacSha2<Aes, Sha> {
     _sha: PhantomData<Sha>,
     _aes: PhantomData<Aes>,
@@ -42,13 +42,13 @@ where
 }
 
 #[allow(non_camel_case_types)]
-/// [Content Encryption with AES_128_CBC_HMAC_SHA_256](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2.3)
+/// [Content Encryption with `AES_128_CBC_HMAC_SHA_256`](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2.3)
 pub type A128CBC_HS256 = AesCbcHmacSha2<aes::Aes128, sha2::Sha256>;
 #[allow(non_camel_case_types)]
-/// [Content Encryption with AES_192_CBC_HMAC_SHA_384](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2.4)
+/// [Content Encryption with `AES_192_CBC_HMAC_SHA_384`](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2.4)
 pub type A192CBC_HS384 = AesCbcHmacSha2<aes::Aes192, sha2::Sha384>;
 #[allow(non_camel_case_types)]
-/// [Content Encryption with AES_256_CBC_HMAC_SHA_512](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2.5)
+/// [Content Encryption with `AES_256_CBC_HMAC_SHA_512`](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2.5)
 pub type A256CBC_HS512 = AesCbcHmacSha2<aes::Aes256, sha2::Sha512>;
 
 macro_rules! aes_cbc {
@@ -167,7 +167,7 @@ mod tests {
         );
         let tag = &hex!("65 2c 3f a3 6b 0a 7c 5b 32 19 fa b3 a3 0b c1 c4");
 
-        cea_round_trip::<A128CBC_HS256>(&key, enc, tag)
+        cea_round_trip::<A128CBC_HS256>(&key, enc, tag);
     }
 
     #[test]
@@ -196,7 +196,7 @@ mod tests {
             "75 16 80 39 cc c7 33 d7"
         );
 
-        cea_round_trip::<A192CBC_HS384>(&key, enc, tag)
+        cea_round_trip::<A192CBC_HS384>(&key, enc, tag);
     }
 
     #[test]
@@ -226,7 +226,7 @@ mod tests {
             "2e 62 69 a8 c5 6a 81 6d bc 1b 26 77 61 95 5b c5"
         );
 
-        cea_round_trip::<A256CBC_HS512>(&key, enc, tag)
+        cea_round_trip::<A256CBC_HS512>(&key, enc, tag);
     }
 
     fn cea_round_trip<C: CEA>(key: &C::Cek, enc: &[u8], tag: &[u8])
