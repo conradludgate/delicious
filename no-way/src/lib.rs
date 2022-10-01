@@ -24,7 +24,7 @@
     clippy::must_use_candidate,
     clippy::default_trait_access,
     clippy::similar_names,
-    clippy::enum_glob_use,
+    clippy::enum_glob_use
 )]
 
 // #![deny(
@@ -71,7 +71,6 @@
 
 use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
-use std::iter;
 use std::ops::Deref;
 
 use serde::de::DeserializeOwned;
@@ -168,8 +167,10 @@ impl CompactPart for () {
     }
 }
 
-/// A convenience type alias of the common "JWT" which is a secured/unsecured compact JWS.
-/// Type `T` is the type of the private claims, and type `H` is the type of private header fields
+/// A convenience type alias of a JSON Web Encryption token in it's decoded form. It
+/// contains a [`ClaimsSet`] as it's contents
+///
+/// Type `T` is the type of private claims for the JWT.
 ///
 /// # Examples
 /// ## Encoding and decoding with HS256
@@ -220,15 +221,10 @@ impl CompactPart for () {
 /// ```
 pub type JWT<T> = jws::Decoded<ClaimsSet<T>, ()>;
 
-/// A convenience type alias of a "JWE" which is a compact JWE that contains a signed/unsigned compact JWS.
+/// A convenience type alias of a JSON Web Encryption token in it's decrypted form. It contains
+/// an encoded JWT<T> as it's contents.
 ///
-/// Type `T` is the type of private claims for the encapsulated JWT, and type `H` is the type of the private
-/// header fields of the encapsulated JWT. Type `I` is the private header fields fo the encapsulating JWE.
-///
-/// Usually, you would set `H` and `I` to `no_way::()` because you usually do not need any private header fields.
-///
-/// In general, you should [sign a JWT claims set, then encrypt it](http://crypto.stackexchange.com/a/5466),
-/// although there is nothing stopping you from doing it the other way round.
+/// Type `T` is the type of private claims for the JWT.
 ///
 /// # Examples
 /// ## Sign with HS256, then encrypt with A256GCMKW and A256GCM
@@ -362,14 +358,14 @@ pub type JWE<T> = jwe::Decrypted<jws::Encoded<ClaimsSet<T>>, ()>;
 #[serde(untagged)]
 pub enum SingleOrMultiple<T> {
     /// One single value
-    Single(T),
+    Single([T; 1]),
     /// Multiple values
     Multiple(Vec<T>),
 }
 
 impl From<&str> for SingleOrMultiple<String> {
     fn from(t: &str) -> Self {
-        Self::Single(t.to_owned())
+        Self::Single([t.to_owned()])
     }
 }
 impl From<&[&str]> for SingleOrMultiple<String> {
@@ -379,7 +375,7 @@ impl From<&[&str]> for SingleOrMultiple<String> {
 }
 impl<T> From<T> for SingleOrMultiple<T> {
     fn from(t: T) -> Self {
-        Self::Single(t)
+        Self::Single([t])
     }
 }
 impl<T> From<Vec<T>> for SingleOrMultiple<T> {
@@ -398,19 +394,17 @@ where
         T: Borrow<Q>,
         Q: ?Sized + PartialEq,
     {
-        match *self {
-            SingleOrMultiple::Single(ref single) => single.borrow() == value,
-            SingleOrMultiple::Multiple(ref vector) => {
-                vector.iter().map(Borrow::borrow).any(|v| v == value)
-            }
+        match self {
+            Self::Single([single]) => single.borrow() == value,
+            Self::Multiple(vector) => vector.iter().any(|v| v.borrow() == value),
         }
     }
 
     /// Yields an iterator for the single value or the list
-    pub fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a T> + 'a> {
-        match *self {
-            SingleOrMultiple::Single(ref single) => Box::new(iter::once(single)),
-            SingleOrMultiple::Multiple(ref vector) => Box::new(vector.iter()),
+    pub fn iter(&self) -> std::slice::Iter<T> {
+        match self {
+            Self::Single(single) => single.iter(),
+            Self::Multiple(vector) => vector.iter(),
         }
     }
 }
@@ -702,11 +696,11 @@ impl RegisteredClaims {
     pub fn validate_aud(&self, validation: Validation<String>) -> Result<(), ValidationError> {
         match validation {
             Validation::Ignored => Ok(()),
-            Validation::Validate(expected_aud) => match self.audience {
-                Some(SingleOrMultiple::Single(ref audience)) if audience != &expected_aud => Err(
-                    ValidationError::InvalidAudience(SingleOrMultiple::Single(audience.clone())),
+            Validation::Validate(expected_aud) => match &self.audience {
+                Some(SingleOrMultiple::Single([audience])) if audience != &expected_aud => Err(
+                    ValidationError::InvalidAudience(SingleOrMultiple::Single([audience.clone()])),
                 ),
-                Some(SingleOrMultiple::Multiple(ref audiences))
+                Some(SingleOrMultiple::Multiple(audiences))
                     if !audiences.contains(&expected_aud) =>
                 {
                     Err(ValidationError::InvalidAudience(
@@ -776,8 +770,8 @@ impl<T: Serialize + DeserializeOwned> CompactPart for ClaimsSet<T> {
 
 #[cfg(test)]
 mod tests {
-    use time::Duration;
     use super::*;
+    use time::Duration;
 
     #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
     struct PrivateClaims {
@@ -1185,7 +1179,7 @@ mod tests {
 
     #[test]
     fn validate_audience_when_single() {
-        let aud = SingleOrMultiple::Single("audience".to_string());
+        let aud: SingleOrMultiple<_> = "audience".into();
 
         let registered_claims = RegisteredClaims {
             audience: Some(aud.clone()),

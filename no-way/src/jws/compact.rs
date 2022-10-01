@@ -283,8 +283,6 @@ where
 {
     /// Validate the temporal claims in the decoded token
     ///
-    /// If `None` is provided for options, the defaults will apply.
-    ///
     /// By default, no temporal claims (namely `iat`, `exp`, `nbf`)
     /// are required, and they will pass validation if they are missing.
     pub fn validate(&self, options: crate::ValidationOptions) -> Result<(), Error> {
@@ -306,7 +304,7 @@ mod tests {
     use crate::jwk::{
         EllipticCurve, EllipticCurveKeyParameters, EllipticCurveKeyType, JWKSet, OctetKey,
     };
-    use crate::{ClaimsSet, CompactPart, RegisteredClaims, SingleOrMultiple};
+    use crate::{ClaimsSet, CompactPart, RegisteredClaims};
 
     #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
     struct PrivateClaims {
@@ -341,11 +339,9 @@ mod tests {
 
         let expected_claims = ClaimsSet::<PrivateClaims> {
             registered: RegisteredClaims {
-                issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
-                subject: Some(FromStr::from_str("John Doe").unwrap()),
-                audience: Some(SingleOrMultiple::Single(
-                    FromStr::from_str("https://acme-customer.com/").unwrap(),
-                )),
+                issuer: Some("https://www.acme.com/".into()),
+                subject: Some("John Doe".into()),
+                audience: Some("https://acme-customer.com/".into()),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },
@@ -368,11 +364,9 @@ mod tests {
     fn compact_jws_round_trip_hs256() {
         let expected_claims = ClaimsSet::<PrivateClaims> {
             registered: RegisteredClaims {
-                issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
-                subject: Some(FromStr::from_str("John Doe").unwrap()),
-                audience: Some(SingleOrMultiple::Single(
-                    FromStr::from_str("https://acme-customer.com/").unwrap(),
-                )),
+                issuer: Some("https://www.acme.com/".into()),
+                subject: Some("John Doe".into()),
+                audience: Some("https://acme-customer.com/".into()),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },
@@ -405,8 +399,8 @@ mod tests {
 
     //     let expected_claims = ClaimsSet::<PrivateClaims> {
     //         registered: RegisteredClaims {
-    //             issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
-    //             subject: Some(FromStr::from_str("John Doe").unwrap()),
+    //             issuer: Some("https://www.acme.com/".into()),
+    //             subject: Some("John Doe".into()),
     //             audience: Some(SingleOrMultiple::Single(
     //                 FromStr::from_str("https://acme-customer.com/").unwrap(),
     //             )),
@@ -465,11 +459,9 @@ mod tests {
 
         let expected_claims = ClaimsSet::<PrivateClaims> {
             registered: RegisteredClaims {
-                issuer: Some(FromStr::from_str("https://www.acme.com/").unwrap()),
-                subject: Some(FromStr::from_str("John Doe").unwrap()),
-                audience: Some(SingleOrMultiple::Single(
-                    FromStr::from_str("https://acme-customer.com/").unwrap(),
-                )),
+                issuer: Some("https://www.acme.com/".into()),
+                subject: Some("John Doe".into()),
+                audience: Some("https://acme-customer.com/".into()),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },

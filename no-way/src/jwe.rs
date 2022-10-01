@@ -724,11 +724,9 @@ mod tests {
         // Construct the JWS
         let claims = crate::ClaimsSet::<()> {
             registered: crate::RegisteredClaims {
-                issuer: Some(FromStr::from_str("https://www.acme.com").unwrap()),
-                subject: Some(FromStr::from_str("John Doe").unwrap()),
-                audience: Some(crate::SingleOrMultiple::Single(
-                    FromStr::from_str("htts://acme-customer.com").unwrap(),
-                )),
+                issuer: Some("https://www.acme.com".into()),
+                subject: Some("John Doe".into()),
+                audience: Some("htts://acme-customer.com".into()),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },
@@ -776,11 +774,9 @@ mod tests {
         // Construct the JWS
         let claims = crate::ClaimsSet::<()> {
             registered: crate::RegisteredClaims {
-                issuer: Some(FromStr::from_str("https://www.acme.com").unwrap()),
-                subject: Some(FromStr::from_str("John Doe").unwrap()),
-                audience: Some(crate::SingleOrMultiple::Single(
-                    FromStr::from_str("htts://acme-customer.com").unwrap(),
-                )),
+                issuer: Some("https://www.acme.com".into()),
+                subject: Some("John Doe".into()),
+                audience: Some("htts://acme-customer.com".into()),
                 not_before: Some(1234.try_into().unwrap()),
                 ..Default::default()
             },

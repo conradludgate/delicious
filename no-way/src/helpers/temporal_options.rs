@@ -5,7 +5,7 @@ use time::{Duration, OffsetDateTime};
 ///
 ///
 /// To deal with clock drifts, you might want to provide an `epsilon` error margin in the form of a
-/// `chrono::Duration` to allow time comparisons to fall within the margin.
+/// [`time::Duration`] to allow time comparisons to fall within the margin.
 pub struct TemporalOptions {
     /// Allow for some leeway for clock drifts, limited to this duration during temporal validation
     pub epsilon: Duration,
