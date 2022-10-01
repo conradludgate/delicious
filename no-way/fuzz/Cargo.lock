@@ -39,9 +39,9 @@ dependencies = [
 
 [[package]]
 name = "arbitrary"
-version = "0.2.0"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64cf76cb6e2222ed0ea86b2b0ee2f71c96ec6edd5af42e84d59160e91b836ec4"
+checksum = "f44124848854b941eafdb34f05b3bcf59472f643c7e151eba7c2b69daa469ed5"
 
 [[package]]
 name = "autocfg"
@@ -105,6 +105,9 @@ name = "cc"
 version = "1.0.73"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fff2a6927b3bb87f9595d67196a70493f627687a71d87a0d692242c33f58c11"
+dependencies = [
+ "jobserver",
+]
 
 [[package]]
 name = "cfg-if"
@@ -167,45 +170,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835"
 dependencies = [
  "cipher",
-]
-
-[[package]]
-name = "no-way"
-version = "0.1.0"
-dependencies = [
- "aead",
- "aes",
- "aes-gcm",
- "base64",
- "bytemuck",
- "cbc",
- "cipher",
- "crypto-common",
- "digest",
- "ecdsa",
- "elliptic-curve",
- "hmac",
- "num-bigint",
- "num-traits",
- "p256",
- "p384",
- "pbkdf2",
- "rand",
- "sec1",
- "serde",
- "serde_json",
- "sha2",
- "signature",
- "time",
-]
-
-[[package]]
-name = "no-way-fuzz"
-version = "0.0.1"
-dependencies = [
- "no-way",
- "libfuzzer-sys",
- "serde_json",
 ]
 
 [[package]]
@@ -367,18 +331,69 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c8af84674fe1f223a982c933a0ee1086ac4d4052aa0fb8060c12c6ad838e754"
 
 [[package]]
-name = "libc"
-version = "0.2.133"
+name = "jobserver"
+version = "0.1.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0f80d65747a3e43d1596c7c5492d95d5edddaabd45a7fcdb02b95f644164966"
+checksum = "068b1ee6743e4d11fb9c6a1e6064b3693a1b600e7f5f5988047d98b3dc9fb90b"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "libc"
+version = "0.2.134"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "329c933548736bc49fd575ee68c89e8be4d260064184389a5b77517cddd99ffb"
 
 [[package]]
 name = "libfuzzer-sys"
-version = "0.1.0"
-source = "git+https://github.com/rust-fuzz/libfuzzer-sys.git#35ce7d7177c254b9c798aec171dfe76877d1a20f"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae185684fe19814afd066da15a7cc41e126886c21282934225d9fc847582da58"
 dependencies = [
  "arbitrary",
  "cc",
+ "once_cell",
+]
+
+[[package]]
+name = "no-way"
+version = "0.1.0"
+dependencies = [
+ "aead",
+ "aes",
+ "aes-gcm",
+ "base64",
+ "bytemuck",
+ "cbc",
+ "cipher",
+ "crypto-common",
+ "digest",
+ "ecdsa",
+ "elliptic-curve",
+ "hmac",
+ "num-bigint",
+ "num-traits",
+ "p256",
+ "p384",
+ "pbkdf2",
+ "rand",
+ "sec1",
+ "serde",
+ "serde_json",
+ "sha2",
+ "signature",
+ "time",
+]
+
+[[package]]
+name = "no-way-fuzz"
+version = "0.0.0"
+dependencies = [
+ "base64",
+ "libfuzzer-sys",
+ "no-way",
+ "serde_json",
 ]
 
 [[package]]
@@ -419,6 +434,12 @@ checksum = "2819ce041d2ee131036f4fc9d6ae7ae125a3a40e97ba64d04fe799ad9dabbb44"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "once_cell"
+version = "1.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e82dad04139b71a90c080c8463fe0dc7902db5192d939bd0950f074d014339e1"
 
 [[package]]
 name = "opaque-debug"
@@ -510,9 +531,9 @@ checksum = "eb9f9e6e233e5c4a35559a617bf40a4ec447db2e84c20b55a6f83167b7e57872"
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.44"
+version = "1.0.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bd7356a8122b6c4a24a82b278680c73357984ca2fc79a0f9fa6dea7dced7c58"
+checksum = "94e2ef8dbfc347b10c094890f778ee2e36ca9bb4262e86dc99cd217e35f3470b"
 dependencies = [
  "unicode-ident",
 ]
@@ -658,9 +679,9 @@ checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
 name = "syn"
-version = "1.0.100"
+version = "1.0.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52205623b1b0f064a4e71182c3b18ae902267282930c6d5462c91b859668426e"
+checksum = "e90cde112c4b9690b8cbe810cba9ddd8bc1d7472e2cae317b69e9438c1cba7d2"
 dependencies = [
  "proc-macro2",
  "quote",

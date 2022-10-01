@@ -69,7 +69,7 @@
 // )]
 // #![doc(test(attr(allow(unused_variables), deny(warnings))))]
 
-use std::borrow::{Borrow, Cow};
+use std::borrow::Cow;
 use std::fmt::Debug;
 use std::ops::Deref;
 
@@ -354,54 +354,103 @@ pub type JWE<T> = jwe::Decrypted<jws::Encoded<ClaimsSet<T>>, ()>;
 /// assert_eq!(deserialized, multiple);
 /// # }
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum SingleOrMultiple<T> {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SingleOrMultiple {
     /// One single value
-    Single([T; 1]),
+    Single([String; 1]),
     /// Multiple values
-    Multiple(Vec<T>),
+    Multiple(Vec<String>),
 }
 
-impl From<&str> for SingleOrMultiple<String> {
+mod serde_impls {
+    use super::SingleOrMultiple;
+
+    impl serde::Serialize for SingleOrMultiple {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            match self {
+                SingleOrMultiple::Single([field]) => field.serialize(serializer),
+                SingleOrMultiple::Multiple(ref field) => field.serialize(serializer),
+            }
+        }
+    }
+
+    struct Visitor;
+    impl<'de> serde::de::Visitor<'de> for Visitor {
+        type Value = SingleOrMultiple;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("single or multiple strings")
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(v.into())
+        }
+
+        fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(v.into())
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut values = Vec::new();
+            while let Some(value) = seq.next_element()? {
+                values.push(value);
+            }
+            Ok(SingleOrMultiple::Multiple(values))
+        }
+    }
+    impl<'de> serde::Deserialize<'de> for SingleOrMultiple {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_any(Visitor)
+        }
+    }
+}
+
+impl From<&str> for SingleOrMultiple {
     fn from(t: &str) -> Self {
         Self::Single([t.to_owned()])
     }
 }
-impl From<&[&str]> for SingleOrMultiple<String> {
+impl From<&[&str]> for SingleOrMultiple {
     fn from(t: &[&str]) -> Self {
         Self::Multiple(t.iter().map(|&s| s.to_owned()).collect())
     }
 }
-impl<T> From<T> for SingleOrMultiple<T> {
-    fn from(t: T) -> Self {
+impl From<String> for SingleOrMultiple {
+    fn from(t: String) -> Self {
         Self::Single([t])
     }
 }
-impl<T> From<Vec<T>> for SingleOrMultiple<T> {
-    fn from(t: Vec<T>) -> Self {
+impl From<Vec<String>> for SingleOrMultiple {
+    fn from(t: Vec<String>) -> Self {
         Self::Multiple(t)
     }
 }
 
-impl<T> SingleOrMultiple<T>
-where
-    T: Clone + Debug + Eq + PartialEq + Serialize + DeserializeOwned + Send + Sync,
-{
+impl SingleOrMultiple {
     /// Checks whether this enum, regardless of single or multiple value contains `value`.
-    pub fn contains<Q>(&self, value: &Q) -> bool
-    where
-        T: Borrow<Q>,
-        Q: ?Sized + PartialEq,
-    {
+    pub fn contains(&self, value: &str) -> bool {
         match self {
-            Self::Single([single]) => single.borrow() == value,
-            Self::Multiple(vector) => vector.iter().any(|v| v.borrow() == value),
+            Self::Single([single]) => single == value,
+            Self::Multiple(vector) => vector.iter().any(|v| v == value),
         }
     }
 
     /// Yields an iterator for the single value or the list
-    pub fn iter(&self) -> std::slice::Iter<T> {
+    pub fn iter(&self) -> std::slice::Iter<String> {
         match self {
             Self::Single(single) => single.iter(),
             Self::Multiple(vector) => vector.iter(),
@@ -471,7 +520,7 @@ pub struct RegisteredClaims {
 
     /// Audience intended for the JWT. Serialized to `aud`
     #[serde(rename = "aud", skip_serializing_if = "Option::is_none")]
-    pub audience: Option<SingleOrMultiple<String>>,
+    pub audience: Option<SingleOrMultiple>,
 
     /// Expiration time in seconds since Unix Epoch. Serialized to `exp`
     #[serde(rename = "exp", skip_serializing_if = "Option::is_none")]
@@ -789,7 +838,7 @@ mod tests {
 
     #[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
     struct SingleOrMultipleStrings {
-        values: SingleOrMultiple<String>,
+        values: SingleOrMultiple,
     }
 
     #[test]
@@ -1179,7 +1228,7 @@ mod tests {
 
     #[test]
     fn validate_audience_when_single() {
-        let aud: SingleOrMultiple<_> = "audience".into();
+        let aud: SingleOrMultiple = "audience".into();
 
         let registered_claims = RegisteredClaims {
             audience: Some(aud.clone()),

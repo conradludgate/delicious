@@ -45,7 +45,7 @@ pub enum Error {
     UnsupportedOperation,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 /// Errors from decoding tokens
 pub enum DecodeError {
     /// Token is invalid in structure or form
@@ -84,7 +84,7 @@ pub enum ValidationError {
     /// The token does not have or has the wrong issuer (iss check failed, RFC7523 3.1)
     InvalidIssuer(String),
     /// The token does not have or has the wrong audience (aud check failed, RFC7523 3.3
-    InvalidAudience(SingleOrMultiple<String>),
+    InvalidAudience(SingleOrMultiple),
     /// The token doesn't contains the Kid claim in the header
     KidMissing,
     /// The by the Kid specified key, wasn't found in the KeySet

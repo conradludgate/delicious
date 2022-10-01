@@ -263,12 +263,7 @@ mod serde_impl {
                 "PBES2-HS384+A192KW",
                 "PBES2-HS512+A256KW",
             ];
-            serde::Deserializer::deserialize_enum(
-                deserializer,
-                "KeyManagementAlgorithm",
-                VARIANTS,
-                Visitor,
-            )
+            deserializer.deserialize_enum("KeyManagementAlgorithm", VARIANTS, Visitor)
         }
     }
 
