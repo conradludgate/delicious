@@ -1,7 +1,11 @@
-# no-way
+# No Way, Jose!
 
-A library to work with Javascript Object Signing and Encryption(JOSE),
-including JSON Web Tokens (JWT), JSON Web Signature (JWS) and JSON Web Encryption (JWE)
+A library to work with Javascript Object Signing and Encryption (JOSE), including:
+* JSON Web Tokens (JWT)
+* JSON Web Signature (JWS)
+* JSON Web Encryption (JWE)
+* JSON Web Algorithms (JWA)
+* JSON Web Keys (JWK)
 
 This was inspired by [`lawliet89/biscuit`](https://github.com/lawliet89/biscuit),
 which is itself based off [`Keats/rust-jwt`](https://github.com/Keats/rust-jwt).

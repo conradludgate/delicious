@@ -26,7 +26,7 @@ pub trait Sign {
 }
 
 /// The none-signing algorithm. You probably don't want to use this in production
-/// 
+///
 /// Your tokens will not be signed, and there will be no data integrity
 pub struct None;
 
