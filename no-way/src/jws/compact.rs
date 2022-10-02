@@ -9,34 +9,39 @@ use serde::Serialize;
 use crate::errors::{Error, ValidationError};
 use crate::jwa::{self, sign};
 use crate::jwk;
-use crate::{CompactPart, Json};
+use crate::{FromCompactPart, Json, ToCompactPart};
 
 use super::Header;
 
 /// Rust representation of a JWS
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Encoded<T, H = ()> {
+pub struct Unverified<T, H = ()> {
     header: Header<H>,
     payload: T,
     payload_base64: String,
     signature: Vec<u8>,
 }
 
-impl<T, H> CompactPart for Encoded<T, H>
+impl<T, H> FromCompactPart for Unverified<T, H>
 where
-    T: CompactPart,
-    H: Serialize + DeserializeOwned,
+    T: FromCompactPart,
+    H: DeserializeOwned,
 {
     fn from_bytes(b: &[u8]) -> Result<Self, Error> {
         std::str::from_utf8(b)?.parse()
     }
-
+}
+impl<T, H> ToCompactPart for Unverified<T, H>
+where
+    T: ToCompactPart,
+    H: Serialize,
+{
     fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
         Ok(self.to_string().into_bytes().into())
     }
 }
 
-impl<T, H> Serialize for Encoded<T, H> {
+impl<T, H> Serialize for Unverified<T, H> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -45,15 +50,17 @@ impl<T, H> Serialize for Encoded<T, H> {
     }
 }
 
-impl<'de, T: CompactPart, H: DeserializeOwned> serde::Deserialize<'de> for Encoded<T, H> {
+impl<'de, T: FromCompactPart, H: DeserializeOwned> serde::Deserialize<'de> for Unverified<T, H> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         struct EncodedVisitor<T, H>(PhantomData<(T, H)>);
 
-        impl<'de, T: CompactPart, H: DeserializeOwned> serde::de::Visitor<'de> for EncodedVisitor<T, H> {
-            type Value = Encoded<T, H>;
+        impl<'de, T: FromCompactPart, H: DeserializeOwned> serde::de::Visitor<'de>
+            for EncodedVisitor<T, H>
+        {
+            type Value = Unverified<T, H>;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a string containing a compact JOSE representation of a JWS")
@@ -71,7 +78,7 @@ impl<'de, T: CompactPart, H: DeserializeOwned> serde::Deserialize<'de> for Encod
     }
 }
 
-impl<T, H> fmt::Display for Encoded<T, H> {
+impl<T, H> fmt::Display for Unverified<T, H> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.payload_base64)?;
         f.write_str(".")?;
@@ -85,9 +92,9 @@ impl<T, H> fmt::Display for Encoded<T, H> {
     }
 }
 
-impl<T, H> FromStr for Encoded<T, H>
+impl<T, H> FromStr for Unverified<T, H>
 where
-    T: CompactPart,
+    T: FromCompactPart,
     H: DeserializeOwned,
 {
     type Err = Error;
@@ -122,16 +129,84 @@ where
     }
 }
 
+impl<T, H> Unverified<Json<T>, H> {
+    pub fn header(&self) -> &Header<H> {
+        &self.header
+    }
+}
+impl<T, H> Unverified<Json<T>, H>
+where
+    T: Serialize + DeserializeOwned,
+    H: Serialize + DeserializeOwned,
+{
+    /// Verify that the token has a valid signature
+    pub fn verify_json<Sign: sign::Sign>(self, key: &Sign::Key) -> Result<Verified<T, H>, Error> {
+        let Verified { header, payload } = self.verify::<Sign>(key)?;
+        Ok(Verified::new_with_header(payload.0, header))
+    }
+}
+impl<T, H> Unverified<T, H> {
+    /// Verify that the token has a valid signature
+    pub fn verify<Sign: sign::Sign>(self, key: &Sign::Key) -> Result<Verified<T, H>, Error> {
+        let Self {
+            header,
+            payload,
+            payload_base64,
+            signature,
+        } = self;
+
+        if header.registered.algorithm != Sign::ALG {
+            Err(ValidationError::WrongAlgorithmHeader)?;
+        }
+
+        Sign::verify(key, payload_base64.as_bytes(), &signature)?;
+
+        Ok(Verified::new_with_header(payload, header.private))
+    }
+
+    /// Verify that the token has a valid signature. It determines the key to use from the `JWKSet` by
+    /// checking the `kid` and validating that all the `alg` headers match.
+    pub fn verify_with_jwks<J, Sign>(self, jwks: &jwk::JWKSet<J>) -> Result<Verified<T, H>, Error>
+    where
+        Sign: sign::Sign,
+        Sign::Key: jwk::Key,
+    {
+        let Header {
+            registered,
+            private,
+        } = self.header;
+
+        let key_id = registered.key_id;
+        let key_id = key_id.as_deref().ok_or(ValidationError::KidMissing)?;
+        let jwk = jwks.find(key_id).ok_or(ValidationError::KeyNotFound)?;
+
+        match jwk.specified.common.algorithm {
+            None => {}
+            Some(jwa::Algorithm::Signature(s)) if s == Sign::ALG => {}
+            Some(_) => return Err(ValidationError::UnsupportedKeyAlgorithm.into()),
+        }
+
+        if registered.algorithm != Sign::ALG {
+            return Err(ValidationError::WrongAlgorithmHeader.into());
+        }
+
+        let key = <Sign::Key as jwk::Key>::from(&jwk.specified)?;
+        Sign::verify(key, self.payload_base64.as_bytes(), &self.signature)?;
+
+        Ok(Verified::new_with_header(self.payload, private))
+    }
+}
+
 /// Rust representation of a JWS
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Decoded<T, H = ()> {
+pub struct Verified<T, H = ()> {
     /// Embedded header
     pub header: H,
     /// Payload, usually a claims set
     pub payload: T,
 }
 
-impl<T, H> Decoded<T, H>
+impl<T, H> Verified<T, H>
 where
     T: Serialize + DeserializeOwned,
     H: Serialize + DeserializeOwned,
@@ -141,48 +216,36 @@ where
     pub fn encode_json<Sign: sign::Sign>(
         self,
         key: &Sign::Key,
-    ) -> Result<Encoded<Json<T>, H>, Error> {
+    ) -> Result<Unverified<Json<T>, H>, Error> {
         let Self { header, payload } = self;
-        Decoded {
+        Verified {
             header,
             payload: Json(payload),
         }
         .encode::<Sign>(key)
     }
-    /// Decode a token into the JWT struct and verify its signature using the concrete Secret
-    /// If the token or its signature is invalid, it will return an error
-    pub fn decode_json<Sign: sign::Sign>(
-        encoded: Encoded<Json<T>, H>,
-        key: &Sign::Key,
-    ) -> Result<Self, Error> {
-        let Decoded { header, payload } = Decoded::decode::<Sign>(encoded, key)?;
-        Ok(Self {
-            header,
-            payload: payload.0,
-        })
-    }
 }
 
-impl<T> Decoded<T> {
+impl<T> Verified<T> {
     /// New decoded JWT
     pub fn new(payload: T) -> Self {
         Self::new_with_header(payload, ())
     }
 }
-impl<T, H> Decoded<T, H> {
+impl<T, H> Verified<T, H> {
     /// New decoded JWT
     pub fn new_with_header(payload: T, header: H) -> Self {
         Self { header, payload }
     }
 }
-impl<T, H> Decoded<T, H>
+impl<T, H> Verified<T, H>
 where
-    T: CompactPart,
-    H: Serialize + DeserializeOwned,
+    T: ToCompactPart,
+    H: Serialize,
 {
     /// Encode the JWT passed and sign the payload using the algorithm from the header and the secret
     /// The secret is dependent on the signing algorithm
-    pub fn encode<Sign: sign::Sign>(self, key: &Sign::Key) -> Result<Encoded<T, H>, Error> {
+    pub fn encode<Sign: sign::Sign>(self, key: &Sign::Key) -> Result<Unverified<T, H>, Error> {
         let Self { header, payload } = self;
         let header = Header {
             private: header,
@@ -197,86 +260,17 @@ where
 
         let signature = Sign::sign(key, payload_base64.as_bytes())?;
 
-        Ok(Encoded {
+        Ok(Unverified {
             header,
             payload,
             payload_base64,
             signature,
         })
     }
-
-    /// Decode a token into the JWT struct and verify its signature using the concrete Secret
-    /// If the token or its signature is invalid, it will return an error
-    pub fn decode<Sign: sign::Sign>(
-        encoded: Encoded<T, H>,
-        key: &Sign::Key,
-    ) -> Result<Self, Error> {
-        let Encoded {
-            header,
-            payload,
-            payload_base64,
-            signature,
-        } = encoded;
-
-        if header.registered.algorithm != Sign::ALG {
-            Err(ValidationError::WrongAlgorithmHeader)?;
-        }
-
-        Sign::verify(key, payload_base64.as_bytes(), &signature)?;
-
-        Ok(Self::new_with_header(payload, header.private))
-    }
-
-    /// Decode a token into the JWT struct and verify its signature using a JWKS
-    ///
-    /// If the JWK does not contain an optional algorithm parameter, you will have to specify
-    /// the expected algorithm or an error will be returned.
-    ///
-    /// If the JWK specifies an algorithm and you provide an expected algorithm,
-    /// both will be checked for equality. If they do not match, an error will be returned.
-    ///
-    /// If the token or its signature is invalid, it will return an error
-    pub fn decode_with_jwks<J, Sign>(
-        encoded: Encoded<T, H>,
-        jwks: &jwk::JWKSet<J>,
-    ) -> Result<Self, Error>
-    where
-        Sign: sign::Sign,
-        Sign::Key: jwk::Key,
-    {
-        let Encoded {
-            header,
-            payload,
-            payload_base64,
-            signature,
-        } = encoded;
-
-        let key_id = header
-            .registered
-            .key_id
-            .as_ref()
-            .ok_or(ValidationError::KidMissing)?;
-        let jwk = jwks.find(key_id).ok_or(ValidationError::KeyNotFound)?;
-
-        match jwk.specified.common.algorithm {
-            None => {}
-            Some(jwa::Algorithm::Signature(s)) if s == Sign::ALG => {}
-            Some(_) => return Err(ValidationError::UnsupportedKeyAlgorithm.into()),
-        }
-
-        if header.registered.algorithm != Sign::ALG {
-            return Err(ValidationError::WrongAlgorithmHeader.into());
-        }
-
-        let key = <Sign::Key as jwk::Key>::from(&jwk.specified)?;
-        Sign::verify(key, payload_base64.as_bytes(), &signature)?;
-
-        Ok(Self::new_with_header(payload, header.private))
-    }
 }
 
 /// Convenience implementation for a Compact that contains a `ClaimsSet`
-impl<P, H> Decoded<crate::ClaimsSet<P>, H>
+impl<P, H> Verified<crate::ClaimsSet<P>, H>
 where
     crate::ClaimsSet<P>: Serialize + DeserializeOwned,
     H: Serialize + DeserializeOwned,
@@ -299,12 +293,12 @@ mod tests {
     use hex_literal::hex;
     use serde::{Deserialize, Serialize};
 
-    use super::{sign, Decoded, Encoded};
+    use super::{sign, Unverified, Verified};
     use crate::errors::Error;
     use crate::jwk::{
         EllipticCurve, EllipticCurveKeyParameters, EllipticCurveKeyType, JWKSet, OctetKey,
     };
-    use crate::{ClaimsSet, CompactPart, RegisteredClaims};
+    use crate::{ClaimsSet, FromCompactPart, RegisteredClaims, ToCompactPart};
 
     #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
     struct PrivateClaims {
@@ -312,11 +306,12 @@ mod tests {
         department: String,
     }
 
-    impl CompactPart for PrivateClaims {
+    impl FromCompactPart for PrivateClaims {
         fn from_bytes(b: &[u8]) -> Result<Self, Error> {
             Ok(serde_json::from_slice(b)?)
         }
-
+    }
+    impl ToCompactPart for PrivateClaims {
         fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
             Ok(serde_json::to_vec(&self)?.into())
         }
@@ -351,12 +346,11 @@ mod tests {
             },
         };
 
-        let expected_jwt = Decoded::new(expected_claims.clone());
+        let expected_jwt = Verified::new(expected_claims.clone());
         let token = expected_jwt.encode::<sign::None>(&()).unwrap();
         assert_eq!(expected_token, token.to_string());
 
-        let biscuit: Decoded<ClaimsSet<PrivateClaims>, ()> =
-            Decoded::decode::<sign::None>(token, &()).unwrap();
+        let biscuit = token.verify::<sign::None>(&()).unwrap();
         assert_eq!(expected_claims, biscuit.payload);
     }
 
@@ -377,12 +371,11 @@ mod tests {
         };
 
         let key = OctetKey::new("secret".to_string().into_bytes());
-        let expected_jwt = Decoded::new(expected_claims.clone());
+        let expected_jwt = Verified::new(expected_claims.clone());
         let token = expected_jwt.encode::<sign::HS256>(&key).unwrap();
         assert_eq!(HS256_PAYLOAD, token.to_string());
 
-        let biscuit: Decoded<ClaimsSet<PrivateClaims>, ()> =
-            Decoded::decode::<sign::HS256>(token, &key).unwrap();
+        let biscuit = token.verify::<sign::HS256>(&key).unwrap();
         assert_eq!(expected_claims, biscuit.payload);
     }
 
@@ -446,8 +439,8 @@ mod tests {
                    do_XppIOFthPWlTXL95CIBfgRdyAxbcIsUfM0YxMjCjqvp4ehHFA3I-JasABKzC8CAy4ndhCHsZdpAtK\
                    kqZMEA";
 
-        let token = Encoded::from_str(jwt).unwrap();
-        Decoded::<ClaimsSet<serde_json::Value>>::decode::<sign::ES256>(token, &public_key).unwrap();
+        let token: Unverified<ClaimsSet<serde_json::Value>> = jwt.parse().unwrap();
+        token.verify::<sign::ES256>(&public_key).unwrap();
     }
 
     #[test]
@@ -476,30 +469,29 @@ mod tests {
             something: "foobar".to_string(),
         };
 
-        let expected_jwt = Decoded::new_with_header(expected_claims, header.clone());
+        let expected_jwt = Verified::new_with_header(expected_claims, header.clone());
 
         let token = expected_jwt.encode::<sign::HS256>(&key).unwrap();
-        let biscuit = Decoded::decode::<sign::HS256>(token, &key).unwrap();
+        let biscuit = token.verify::<sign::HS256>(&key).unwrap();
         assert_eq!(header, biscuit.header);
     }
 
     #[test]
     #[should_panic(expected = "PartsLengthError { expected: 3, actual: 1 }")]
     fn compact_jws_decode_token_missing_parts() {
-        Encoded::<()>::from_str("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9").unwrap();
+        Unverified::<()>::from_str("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9").unwrap();
     }
 
     #[test]
     #[should_panic(expected = "InvalidSignature")]
     fn compact_jws_decode_token_invalid_signature_hs256() {
-        let token = Encoded::from_str(
-            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.\
+        let token: Unverified<PrivateClaims> = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.\
              eyJzdWIiOiJiQGIuY29tIiwiY29tcGFueSI6IkFDTUUiLCJkZXBhcnRtZW50IjoiQ3J5cHRvIn0.\
-             pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI",
-        )
-        .unwrap();
+             pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI"
+            .parse()
+            .unwrap();
         let key = OctetKey::new("secret".to_string().into_bytes());
-        Decoded::<PrivateClaims>::decode::<sign::HS256>(token, &key).unwrap();
+        token.verify::<sign::HS256>(&key).unwrap();
     }
 
     // #[test]
@@ -520,15 +512,14 @@ mod tests {
     #[test]
     #[should_panic(expected = "WrongAlgorithmHeader")]
     fn compact_jws_decode_token_wrong_algorithm() {
-        let token = Encoded::from_str(
-            "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.\
+        let token: Unverified<PrivateClaims> = "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.\
              eyJzdWIiOiJiQGIuY29tIiwiY29tcGFueSI6IkFDTUUiLCJkZXBhcnRtZW50IjoiQ3J5cHRvIn0.\
-             pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI",
-        )
-        .unwrap();
+             pKscJVk7-aHxfmQKlaZxh5uhuKhGMAa-1F5IX5mfUwI"
+            .parse()
+            .unwrap();
 
         let key = OctetKey::new("secret".to_string().into_bytes());
-        Decoded::<PrivateClaims>::decode::<sign::HS256>(token, &key).unwrap();
+        token.verify::<sign::HS256>(&key).unwrap();
     }
 
     #[test]
@@ -544,22 +535,22 @@ mod tests {
         ];
 
         let key = OctetKey::new("secret".to_string().into_bytes());
-        let expected_jwt = Decoded::new(payload.clone());
+        let expected_jwt = Verified::new(payload.clone());
         let token = expected_jwt.encode::<sign::HS256>(&key).unwrap();
         assert_eq!(expected_token, token.to_string());
 
-        let biscuit = Decoded::decode::<sign::HS256>(token, &key).unwrap();
+        let biscuit = token.verify::<sign::HS256>(&key).unwrap();
         assert_eq!(payload, biscuit.payload);
     }
 
     #[test]
     fn compact_jws_decode_with_jwks_shared_secret() {
-        let token = Encoded::from_str(
+        let token: Unverified<PrivateClaims> =
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-        )
-        .unwrap();
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
+                .parse()
+                .unwrap();
 
         let jwks: JWKSet = serde_json::from_str(
             r#"{
@@ -576,19 +567,19 @@ mod tests {
         )
         .unwrap();
 
-        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+        token.verify_with_jwks::<_, sign::HS256>(&jwks).unwrap();
     }
 
     /// JWK has algorithm and user provided a non-matching expected algorithm
     #[test]
     #[should_panic(expected = "UnsupportedKeyAlgorithm")]
     fn compact_jws_decode_with_jwks_shared_secret_mismatched_alg() {
-        let token = Encoded::from_str(
+        let token: Unverified<PrivateClaims> =
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-        )
-        .unwrap();
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
+                .parse()
+                .unwrap();
 
         let jwks: JWKSet = serde_json::from_str(
             r#"{
@@ -605,18 +596,18 @@ mod tests {
         )
         .unwrap();
 
-        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::ES256>(token, &jwks).unwrap();
+        token.verify_with_jwks::<_, sign::ES256>(&jwks).unwrap();
     }
 
     /// JWK has no algorithm and user provided a header matching expected algorithm
     #[test]
     fn compact_jws_decode_with_jwks_without_alg() {
-        let token = Encoded::from_str(
+        let token: Unverified<PrivateClaims> =
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-        )
-        .unwrap();
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
+                .parse()
+                .unwrap();
 
         let jwks: JWKSet = serde_json::from_str(
             r#"{
@@ -632,19 +623,19 @@ mod tests {
         )
         .unwrap();
 
-        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+        token.verify_with_jwks::<_, sign::HS256>(&jwks).unwrap();
     }
 
     /// JWK has no algorithm and user provided a header not-matching expected algorithm
     #[test]
     #[should_panic(expected = "WrongAlgorithmHeader")]
     fn compact_jws_decode_with_jwks_without_alg_non_matching() {
-        let token = Encoded::from_str(
+        let token: Unverified<PrivateClaims> =
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-        )
-        .unwrap();
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
+                .parse()
+                .unwrap();
 
         let jwks: JWKSet = serde_json::from_str(
             r#"{
@@ -660,7 +651,7 @@ mod tests {
         )
         .unwrap();
 
-        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::ES256>(token, &jwks).unwrap();
+        token.verify_with_jwks::<_, sign::ES256>(&jwks).unwrap();
     }
 
     // #[test]
@@ -698,7 +689,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "PartsLengthError { expected: 3, actual: 2 }")]
     fn compact_jws_decode_with_jwks_missing_parts() {
-        Encoded::<()>::from_str(
+        Unverified::<PrivateClaims>::from_str(
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ",
         )
@@ -708,12 +699,12 @@ mod tests {
     #[test]
     #[should_panic(expected = "KeyNotFound")]
     fn compact_jws_decode_with_jwks_key_not_found() {
-        let token = Encoded::from_str(
+        let token: Unverified<PrivateClaims> =
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-        )
-        .unwrap();
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
+                .parse()
+                .unwrap();
 
         let jwks: JWKSet = serde_json::from_str(
             r#"{
@@ -730,18 +721,17 @@ mod tests {
         )
         .unwrap();
 
-        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+        token.verify_with_jwks::<_, sign::HS256>(&jwks).unwrap();
     }
 
     #[test]
     #[should_panic(expected = "KidMissing")]
     fn compact_jws_decode_with_jwks_kid_missing() {
-        let token = Encoded::from_str(
-            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.\
+        let token: Unverified<PrivateClaims> = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             QhdrScTpNXF2d0RbG_UTWu2gPKZfzANj6XC4uh-wOoU",
-        )
-        .unwrap();
+             QhdrScTpNXF2d0RbG_UTWu2gPKZfzANj6XC4uh-wOoU"
+            .parse()
+            .unwrap();
 
         let jwks: JWKSet = serde_json::from_str(
             r#"{
@@ -758,18 +748,18 @@ mod tests {
         )
         .unwrap();
 
-        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+        token.verify_with_jwks::<_, sign::HS256>(&jwks).unwrap();
     }
 
     #[test]
     #[should_panic(expected = "UnsupportedKeyAlgorithm")]
     fn compact_jws_decode_with_jwks_algorithm_not_supported() {
-        let token = Encoded::from_str(
+        let token: Unverified<PrivateClaims> =
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-        )
-        .unwrap();
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
+                .parse()
+                .unwrap();
 
         let jwks: JWKSet = serde_json::from_str(
             r#"{
@@ -786,18 +776,18 @@ mod tests {
         )
         .unwrap();
 
-        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+        token.verify_with_jwks::<_, sign::HS256>(&jwks).unwrap();
     }
 
     #[test]
     #[should_panic(expected = "UnsupportedKeyAlgorithm")]
     fn compact_jws_decode_with_jwks_key_type_not_supported() {
-        let token = Encoded::from_str(
+        let token: Unverified<PrivateClaims> =
             "eyJhbGciOiAiRVMyNTYiLCJ0eXAiOiAiSldUIiwia2lkIjogImtleTAifQ.\
              eyJjb21wYW55IjoiQUNNRSIsImRlcGFydG1lbnQiOiJUb2lsZXQgQ2xlYW5pbmcifQ.\
-             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw",
-        )
-        .unwrap();
+             nz0a8aSweo6W0K2P7keByUPWl0HLVG45pTDznij5uKw"
+                .parse()
+                .unwrap();
 
         let jwks: JWKSet = serde_json::from_str(
             r#"{
@@ -817,6 +807,6 @@ mod tests {
         )
         .unwrap();
 
-        Decoded::<PrivateClaims>::decode_with_jwks::<_, sign::HS256>(token, &jwks).unwrap();
+        token.verify_with_jwks::<_, sign::HS256>(&jwks).unwrap();
     }
 }

@@ -8,8 +8,7 @@ use axum::{
 };
 use no_way::{
     jwa::{cea, kma, sign},
-    jwe::Encrypted,
-    JWT,
+    jwe::Encrypted, JWE,
 };
 use serde::{Deserialize, Serialize};
 
@@ -45,8 +44,8 @@ impl<B: Send> FromRequest<B> for Auth {
         let secret = SecretKey::from_request(req);
 
         let token: Encrypted<kma::PBES2_HS256_A128KW> = token.token().parse()?;
-        let jwe = token.decrypt::<_, cea::A128CBC_HS256>(&secret.0)?;
-        let jwt = JWT::decode_json::<sign::HS256>(jwe.payload, &secret.0)?;
+        let jwe: JWE<_> = token.decrypt::<_, cea::A128CBC_HS256>(&secret.0)?;
+        let jwt = jwe.payload.verify::<sign::HS256>(&secret.0)?;
         Ok(jwt.payload.private)
     }
 }

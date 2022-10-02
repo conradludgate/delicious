@@ -2,211 +2,17 @@
 mod compact;
 // mod flattened;
 
-pub use compact::{Decoded, Encoded};
+pub use compact::{Unverified, Verified};
 // pub use flattened::{Signable, SignedData};
 use serde::de::DeserializeOwned;
 
 use crate::errors::Error;
 use crate::jwa::sign;
 use crate::jwk;
-use crate::CompactPart;
+use crate::{FromCompactPart, ToCompactPart};
 
-use num_bigint::BigUint;
-// use ring::signature;
 use serde::{self, Deserialize, Serialize};
 use std::borrow::Cow;
-// use std::sync::Arc;
-
-/// The secrets used to sign and/or encrypt tokens
-#[derive(Clone)]
-pub enum Secret {
-    /// Used with the `None` algorithm variant.
-    None,
-    /// Bytes used for HMAC secret. Can be constructed from a string literal
-    ///
-    /// # Examples
-    /// ```
-    /// use no_way::jws::Secret;
-    ///
-    /// let secret = Secret::bytes_from_str("secret");
-    /// ```
-    Bytes(Vec<u8>),
-    // /// An RSA Key pair constructed from a DER-encoded private key
-    // ///
-    // /// To generate a private key, use
-    // ///
-    // /// ```sh
-    // /// openssl genpkey -algorithm RSA \
-    // ///                 -pkeyopt rsa_keygen_bits:2048 \
-    // ///                 -outform der \
-    // ///                 -out private_key.der
-    // /// ```
-    // ///
-    // /// Often, keys generated for use in OpenSSL-based software are
-    // /// encoded in PEM format, which is not supported by *ring*. PEM-encoded
-    // /// keys that are in `RSAPrivateKey` format can be decoded into the using
-    // /// an OpenSSL command like this:
-    // ///
-    // /// ```sh
-    // /// openssl rsa -in private_key.pem -outform DER -out private_key.der
-    // /// ```
-    // ///
-    // /// # Examples
-    // /// ```
-    // /// use no_way::jws::Secret;
-    // ///
-    // /// let secret = Secret::rsa_keypair_from_file("test/fixtures/rsa_private_key.der");
-    // /// ```
-    // RsaKeyPair(Arc<signature::RsaKeyPair>),
-    // /// An ECDSA Key pair constructed from a PKCS8 DER encoded private key
-    // ///
-    // /// To generate a private key, use
-    // ///
-    // /// ```sh
-    // /// openssl ecparam -genkey -name prime256v1 | \
-    // /// openssl pkcs8 -topk8 -nocrypt -outform DER > ecdsa_private_key.p8
-    // /// ```
-    // ///
-    // /// # Examples
-    // /// ```
-    // /// use no_way::jws::Secret;
-    // ///
-    // /// let secret = Secret::ecdsa_keypair_from_file(no_way::jwa::sign::Algorithm::ES256, "test/fixtures/ecdsa_private_key.p8");
-    // /// ```
-    // EcdsaKeyPair(Arc<signature::EcdsaKeyPair>),
-    /// Bytes of a DER encoded RSA Public Key
-    ///
-    /// To generate the public key from your DER-encoded private key
-    ///
-    /// ```sh
-    /// openssl rsa -in private_key.der \
-    ///             -inform DER
-    ///             -RSAPublicKey_out \
-    ///             -outform DER \
-    ///             -out public_key.der
-    /// ```
-    ///
-    /// To convert a PEM formatted public key
-    ///
-    /// ```sh
-    /// openssl rsa -RSAPublicKey_in \
-    ///             -in public_key.pem \
-    ///             -inform PEM \
-    ///             -outform DER \
-    ///             -RSAPublicKey_out \
-    ///             -out public_key.der
-    /// ```
-    ///
-    /// Note that the underlying crate (ring) does not support the format used
-    /// by OpenSSL. You can check the format using
-    ///
-    /// ```sh
-    /// openssl asn1parse -inform DER -in public_key.der
-    /// ```
-    ///
-    /// It should output something like
-    ///
-    /// ```sh
-    ///     0:d=0  hl=4 l= 290 cons: SEQUENCE
-    ///     4:d=1  hl=2 l=  13 cons: SEQUENCE
-    ///     6:d=2  hl=2 l=   9 prim: OBJECT            :rsaEncryption
-    ///    17:d=2  hl=2 l=   0 prim: NULL
-    ///    19:d=1  hl=4 l= 271 prim: BIT STRING
-    /// ```
-    ///
-    /// There is a header here that indicates the content of the file
-    /// (a public key for `rsaEncryption`). The actual key is contained
-    /// within the BIT STRING at the end. The bare public key can be
-    /// extracted with
-    ///
-    /// ```sh
-    /// openssl asn1parse -inform DER \
-    ///                   -in public_key.der \
-    ///                   -offset 24 \
-    ///                   -out public_key_extracted.der
-    /// ```
-    ///
-    /// Run the following to verify that the key is in the right format
-    ///
-    /// ```sh
-    /// openssl asn1parse -inform DER -in public_key_extracted.der
-    /// ```
-    ///
-    /// The right format looks like this (the `<>` elements show the actual
-    /// numbers)
-    ///
-    /// ```sh
-    ///     0:d=0  hl=4 l= 266 cons: SEQUENCE
-    ///     4:d=1  hl=4 l= 257 prim: INTEGER           :<public key modulus>
-    ///   265:d=1  hl=2 l=   3 prim: INTEGER           :<public key exponent>
-    /// ```
-    ///
-    /// Every other format will be rejected by ring with an unspecified error.
-    /// Note that OpenSSL is no longer able to interpret this file as a public key,
-    /// since it no longer contains the expected header.
-    ///
-    /// # Examples
-    /// ```
-    /// use no_way::jws::Secret;
-    ///
-    /// let secret = Secret::public_key_from_file("test/fixtures/rsa_public_key.der");
-    PublicKey(Vec<u8>),
-    /// Use the modulus (`n`) and exponent (`e`) of an RSA key directly
-    ///
-    /// These parameters can be obtained from a JWK directly using
-    /// [`jwk::RSAKeyParameters::jws_public_key_secret`]
-    RSAModulusExponent {
-        /// RSA modulus
-        n: BigUint,
-        /// RSA exponent
-        e: BigUint,
-    },
-}
-
-impl Secret {
-    fn read_bytes(path: &str) -> Result<Vec<u8>, Error> {
-        Ok(std::fs::read(path)?)
-    }
-
-    /// Convenience function to create a secret bytes array from a string
-    /// See example in the [`Secret::Bytes`] variant documentation for usage.
-    pub fn bytes_from_str(secret: &str) -> Self {
-        Secret::Bytes(secret.to_string().into_bytes())
-    }
-
-    // /// Convenience function to get the RSA Keypair from a DER encoded RSA private key.
-    // /// See example in the [`Secret::RsaKeyPair`] variant documentation for usage.
-    // pub fn rsa_keypair_from_file(path: &str) -> Result<Self, Error> {
-    //     let der = Self::read_bytes(path)?;
-    //     let key_pair = signature::RsaKeyPair::from_der(der.as_slice())?;
-    //     Ok(Secret::RsaKeyPair(Arc::new(key_pair)))
-    // }
-
-    // /// Convenience function to get the ECDSA Keypair from a PKCS8-DER encoded EC private key.
-    // pub fn ecdsa_keypair_from_file(algorithm: sign::Algorithm, path: &str) -> Result<Self, Error> {
-    //     let der = Self::read_bytes(path)?;
-    //     let ring_algorithm = match algorithm {
-    //         sign::Algorithm::ES256 => &signature::ECDSA_P256_SHA256_FIXED_SIGNING,
-    //         sign::Algorithm::ES384 => &signature::ECDSA_P384_SHA384_FIXED_SIGNING,
-    //         _ => return Err(Error::UnsupportedOperation),
-    //     };
-    //     let key_pair = signature::EcdsaKeyPair::from_pkcs8(ring_algorithm, der.as_slice())?;
-    //     Ok(Secret::EcdsaKeyPair(Arc::new(key_pair)))
-    // }
-
-    /// Convenience function to create a Public key from a DER encoded RSA or ECDSA public key
-    /// See examples in the [`Secret::PublicKey`] variant documentation for usage.
-    pub fn public_key_from_file(path: &str) -> Result<Self, Error> {
-        let der = Self::read_bytes(path)?;
-        Ok(Secret::PublicKey(der))
-    }
-}
-
-impl From<jwk::RSAKeyParameters> for Secret {
-    fn from(rsa: jwk::RSAKeyParameters) -> Self {
-        rsa.jws_public_key_secret()
-    }
-}
 
 /// JWS Header, consisting of the registered fields and other custom fields
 #[derive(Debug, Eq, PartialEq, Clone, Default, Serialize, Deserialize)]
@@ -219,11 +25,12 @@ pub struct Header<T = ()> {
     pub private: T,
 }
 
-impl<T: Serialize + DeserializeOwned> CompactPart for Header<T> {
+impl<T: DeserializeOwned> FromCompactPart for Header<T> {
     fn from_bytes(b: &[u8]) -> Result<Self, Error> {
         Ok(serde_json::from_slice(b)?)
     }
-
+}
+impl<T: Serialize> ToCompactPart for Header<T> {
     fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
         Ok(serde_json::to_vec(&self)?.into())
     }

@@ -15,7 +15,6 @@
 //! use no_way::{ClaimsSet, RegisteredClaims, JWT, JWE};
 //! use no_way::jwk;
 //! use no_way::jwe::Encrypted;
-//! use no_way::jws::Decoded;
 //! use no_way::jwa::{kma, cea, sign};
 //! use serde::{Serialize, Deserialize};
 //!
@@ -97,10 +96,10 @@
 //! let encrypted_jwe: Encrypted<kma::A256GCMKW> = jwe_token.parse().unwrap();
 //!
 //! // Decrypt
-//! let decrypted_jwe = encrypted_jwe.decrypt::<_, cea::A256GCM>(&key).unwrap();
+//! let decrypted_jwe: JWE<_> = encrypted_jwe.decrypt::<_, cea::A256GCM>(&key).unwrap();
 //!
-//! // Decode and verify the JWT signature
-//! let decoded_jwt = JWT::decode::<sign::HS256>(decrypted_jwe.payload, &signing_key).unwrap();
+//! // Verify the JWT signature
+//! let decoded_jwt = decrypted_jwe.payload.verify::<sign::HS256>(&signing_key).unwrap();
 //!
 //! assert_eq!(decoded_jwt.payload, expected_claims);
 //! ```
@@ -124,48 +123,6 @@
     clippy::similar_names,
     clippy::enum_glob_use
 )]
-
-// #![deny(
-//     arithmetic_overflow,
-//     bad_style,
-//     const_err,
-//     dead_code,
-//     improper_ctypes,
-//     missing_docs,
-//     mutable_transmutes,
-//     no_mangle_const_items,
-//     non_camel_case_types,
-//     non_shorthand_field_patterns,
-//     non_upper_case_globals,
-//     overflowing_literals,
-//     path_statements,
-//     patterns_in_fns_without_body,
-//     private_in_public,
-//     stable_features,
-//     trivial_casts,
-//     trivial_numeric_casts,
-//     unconditional_recursion,
-//     unknown_crate_types,
-//     unreachable_code,
-//     unused_allocation,
-//     unused_assignments,
-//     unused_attributes,
-//     unused_comparisons,
-//     unused_extern_crates,
-//     unused_features,
-//     unused_import_braces,
-//     unused_imports,
-//     unused_must_use,
-//     unused_mut,
-//     unused_parens,
-//     unused_qualifications,
-//     unused_results,
-//     unused_unsafe,
-//     unused_variables,
-//     variant_size_differences,
-//     while_true
-// )]
-// #![doc(test(attr(allow(unused_variables), deny(warnings))))]
 
 use std::borrow::Cow;
 use std::fmt::Debug;
@@ -194,12 +151,10 @@ pub mod jwe;
 pub mod jwk;
 pub mod jws;
 
-// pub mod digest;
-
 use crate::errors::{Error, ValidationError};
 
 /// A trait to describe how to parse components of a compact form JWS or JWE
-pub trait CompactPart: Sized {
+pub trait FromCompactPart: Sized {
     /// Try and parse raw bytes into Self
     fn from_bytes(b: &[u8]) -> Result<Self, Error>;
 
@@ -208,7 +163,10 @@ pub trait CompactPart: Sized {
         let bytes = base64::decode_config(b, base64::URL_SAFE_NO_PAD)?;
         Self::from_bytes(&bytes)
     }
+}
 
+/// A trait to describe how to produce components of a compact form JWS or JWE
+pub trait ToCompactPart: Sized {
     /// Convert self into raw bytes
     fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error>;
 
@@ -221,27 +179,29 @@ pub trait CompactPart: Sized {
 /// A [`CompactPart`] type that parses data as json using [`serde_json`]
 pub struct Json<T>(pub T);
 
-impl<T: Serialize + DeserializeOwned> CompactPart for Json<T> {
+impl<T: DeserializeOwned> FromCompactPart for Json<T> {
     fn from_bytes(b: &[u8]) -> Result<Self, Error> {
         Ok(Json(serde_json::from_slice(b)?))
     }
-
+}
+impl<T: Serialize> ToCompactPart for Json<T> {
     fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
         Ok(serde_json::to_vec(&self.0)?.into())
     }
 }
 
-impl CompactPart for Vec<u8> {
+impl FromCompactPart for Vec<u8> {
     fn from_bytes(b: &[u8]) -> Result<Self, Error> {
         Ok(b.to_vec())
     }
-
+}
+impl ToCompactPart for Vec<u8> {
     fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
         Ok(self.as_slice().into())
     }
 }
 
-impl CompactPart for () {
+impl FromCompactPart for () {
     fn from_bytes(b: &[u8]) -> Result<Self, Error> {
         if b.is_empty() {
             Ok(())
@@ -256,7 +216,8 @@ impl CompactPart for () {
         // contents doesn't matter
         Self::from_bytes(b.as_bytes())
     }
-
+}
+impl ToCompactPart for () {
     fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
         Ok(Cow::Borrowed(&[]))
     }
@@ -313,11 +274,11 @@ impl CompactPart for () {
 ///
 /// // ... some time later, we get token back!
 ///
-/// let encoded_token: jws::Encoded<ClaimsSet::<PrivateClaims>> = token.parse().unwrap();
-/// let token = JWT::<_>::decode::<jwa::sign::HS256>(encoded_token, &signing_key).unwrap();
+/// let encoded_token: jws::Unverified<_> = token.parse().unwrap();
+/// let token: JWT<_> = encoded_token.verify::<jwa::sign::HS256>(&signing_key).unwrap();
 /// assert_eq!(token.payload, expected_claims);
 /// ```
-pub type JWT<T> = jws::Decoded<ClaimsSet<T>, ()>;
+pub type JWT<T> = jws::Verified<ClaimsSet<T>, ()>;
 
 /// A convenience type alias of a JSON Web Encryption token in it's decrypted form. It contains
 /// an encoded JWT<T> as it's contents.
@@ -410,7 +371,7 @@ pub type JWT<T> = jws::Decoded<ClaimsSet<T>, ()>;
 ///
 /// assert_eq!(jws, decrypted_jwe.payload);
 /// ```
-pub type JWE<T> = jwe::Decrypted<jws::Encoded<ClaimsSet<T>>, ()>;
+pub type JWE<T> = jwe::Decrypted<jws::Unverified<ClaimsSet<T>>, ()>;
 
 /// Represents a choice between a single value or multiple string values.
 ///
@@ -888,11 +849,12 @@ pub struct ClaimsSet<T> {
     pub private: T,
 }
 
-impl<T: Serialize + DeserializeOwned> CompactPart for ClaimsSet<T> {
+impl<T: DeserializeOwned> FromCompactPart for ClaimsSet<T> {
     fn from_bytes(b: &[u8]) -> Result<Self, Error> {
         Ok(serde_json::from_slice(b)?)
     }
-
+}
+impl<T: Serialize> ToCompactPart for ClaimsSet<T> {
     fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
         Ok(serde_json::to_vec(&self)?.into())
     }

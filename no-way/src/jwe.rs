@@ -14,7 +14,7 @@ use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::errors::{Error, ValidationError};
 use crate::jwa::{self, cea, kma};
-use crate::CompactPart;
+use crate::{FromCompactPart, ToCompactPart};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 /// Compression algorithm applied to plaintext before encryption.
@@ -191,15 +191,20 @@ pub struct Header<KmaHeader, T = ()> {
     pub private: T,
 }
 
-impl<KmaHeader, T> CompactPart for Header<KmaHeader, T>
+impl<KmaHeader, T> FromCompactPart for Header<KmaHeader, T>
 where
-    KmaHeader: Serialize + DeserializeOwned,
-    T: Serialize + DeserializeOwned,
+    KmaHeader: DeserializeOwned,
+    T: DeserializeOwned,
 {
     fn from_bytes(b: &[u8]) -> Result<Self, Error> {
         Ok(serde_json::from_slice(b)?)
     }
-
+}
+impl<KmaHeader, T> ToCompactPart for Header<KmaHeader, T>
+where
+    KmaHeader: Serialize,
+    T: Serialize,
+{
     fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
         Ok(serde_json::to_vec(&self)?.into())
     }
@@ -234,7 +239,7 @@ pub struct Encrypted<KMA: kma::KMA, H = ()> {
     tag: Vec<u8>,
 }
 
-impl<KMA, H> CompactPart for Encrypted<KMA, H>
+impl<KMA, H> FromCompactPart for Encrypted<KMA, H>
 where
     KMA: kma::KMA,
     H: DeserializeOwned,
@@ -242,7 +247,11 @@ where
     fn from_bytes(b: &[u8]) -> Result<Self, Error> {
         std::str::from_utf8(b)?.parse()
     }
-
+}
+impl<KMA, H> ToCompactPart for Encrypted<KMA, H>
+where
+    KMA: kma::KMA,
+{
     fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
         Ok(self.to_string().into_bytes().into())
     }
@@ -357,7 +366,7 @@ where
     pub fn decrypt<T, CEA>(self, key: &KMA::Key) -> Result<Decrypted<T, H>, Error>
     where
         CEA: jwa::cea::CEA<Cek = KMA::Cek>,
-        T: CompactPart,
+        T: FromCompactPart,
     {
         let Self {
             header,
@@ -434,7 +443,7 @@ impl<T, H> Decrypted<T, H> {
 
 impl<T, H> Decrypted<T, H>
 where
-    T: CompactPart,
+    T: ToCompactPart,
     H: Serialize + DeserializeOwned,
 {
     /// Encrypt an Decrypted JWE.
@@ -734,7 +743,7 @@ mod tests {
         };
 
         let key = OctetKey::new("secret".to_string().into_bytes());
-        let jws = jws::Decoded::new(claims);
+        let jws = jws::Verified::new(claims);
         let jws = jws.encode::<sign::HS256>(&key).unwrap();
 
         // Construct the encryption key
@@ -784,7 +793,7 @@ mod tests {
         };
 
         let key = OctetKey::new("secret".to_string().into_bytes());
-        let jws = jws::Decoded::new(claims);
+        let jws = jws::Verified::new(claims);
         let jws = jws.encode::<sign::HS256>(&key).unwrap();
 
         // Construct the encryption key

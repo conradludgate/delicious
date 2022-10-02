@@ -4,8 +4,8 @@ use axum::{
     http::StatusCode,
     Json, TypedHeader,
 };
-use no_way::{jwa::sign, jws::Decoded};
 use headers_core::{Header, HeaderName, HeaderValue};
+use no_way::jwa::sign;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -41,8 +41,7 @@ impl<B: Send> FromRequest<B> for Session {
         if let Some(TypedHeader(cache)) = cache {
             let secret = SecretKey::from_request(req);
 
-            if let Ok(session) = Decoded::<Session>::decode_json::<sign::HS256>(cache.0, &secret.0)
-            {
+            if let Ok(session) = cache.0.verify_json::<sign::HS256>(&secret.0) {
                 return Ok(session.payload);
             }
         }
@@ -50,7 +49,7 @@ impl<B: Send> FromRequest<B> for Session {
     }
 }
 
-pub struct UmamiCache(no_way::jws::Encoded<no_way::Json<Session>>);
+pub struct UmamiCache(no_way::jws::Unverified<no_way::Json<Session>>);
 
 impl Header for UmamiCache {
     fn name() -> &'static HeaderName {
