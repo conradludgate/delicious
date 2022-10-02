@@ -13,6 +13,7 @@ use serde::de::{self, DeserializeOwned};
 use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::errors::{Error, ValidationError};
+use crate::jwa::cea::EncryptionResult;
 use crate::jwa::{self, cea, kma};
 use crate::{FromCompactPart, ToCompactPart};
 
@@ -232,11 +233,8 @@ impl From<RegisteredHeader> for Header<(), ()> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Encrypted<KMA: kma::KMA, H = ()> {
     header: Header<KMA::Header, H>,
-    header_base64: String,
+    res: EncryptionResult,
     encrypted_cek: Vec<u8>,
-    iv: Vec<u8>,
-    encrypted_payload: Vec<u8>,
-    tag: Vec<u8>,
 }
 
 impl<KMA, H> FromCompactPart for Encrypted<KMA, H>
@@ -294,13 +292,15 @@ impl<'de, KMA: kma::KMA, H: DeserializeOwned> Deserialize<'de> for Encrypted<KMA
 
 impl<KMA: kma::KMA, H> fmt::Display for Encrypted<KMA, H> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.header_base64)?;
+        f.write_str(
+            std::str::from_utf8(self.res.aad()).expect("we only write base64 strings in here"),
+        )?;
         let mut buf = [0; 1024];
         let parts = [
             &self.encrypted_cek,
-            &self.iv,
-            &self.encrypted_payload,
-            &self.tag,
+            self.res.nonce(),
+            self.res.encrypted_payload(),
+            self.res.tag(),
         ];
         for part in parts {
             f.write_str(".")?;
@@ -345,13 +345,18 @@ where
 
         let header = base64::decode_config(header_base64, base64::URL_SAFE_NO_PAD)?;
         let header = serde_json::from_slice(&header)?;
+
+        let mut res = EncryptionResult::new_with_aad(header_base64.as_bytes().to_vec());
+        base64::decode_config_buf(iv, base64::URL_SAFE_NO_PAD, &mut res.data)?;
+        res.payload = res.data.len();
+        base64::decode_config_buf(payload, base64::URL_SAFE_NO_PAD, &mut res.data)?;
+        res.tag = res.data.len();
+        base64::decode_config_buf(tag, base64::URL_SAFE_NO_PAD, &mut res.data)?;
+
         Ok(Self {
             header,
-            header_base64: header_base64.to_owned(),
             encrypted_cek: Vec::from_base64(cek)?,
-            iv: Vec::from_base64(iv)?,
-            encrypted_payload: Vec::from_base64(payload)?,
-            tag: Vec::from_base64(tag)?,
+            res,
         })
     }
 }
@@ -370,11 +375,8 @@ where
     {
         let Self {
             header,
-            header_base64,
             encrypted_cek,
-            iv,
-            encrypted_payload,
-            tag,
+            res,
         } = self;
 
         // Verify that the algorithms are expected
@@ -392,13 +394,7 @@ where
         let cek = KMA::unwrap(&encrypted_cek, key, header.kma)?;
 
         // Build encryption result as per steps 14-15
-        let encrypted_payload_result = cea::EncryptionResult {
-            nonce: iv,
-            tag,
-            encrypted: encrypted_payload,
-            additional_data: header_base64.into_bytes(),
-        };
-        let payload = CEA::decrypt(&cek, &encrypted_payload_result)?;
+        let payload = CEA::decrypt(&cek, &res)?;
 
         // Decompression is not supported at the moment
         if header.registered.compression_algorithm.is_some() {
@@ -494,21 +490,18 @@ where
         let encoded_protected_header = header.to_base64()?;
 
         // Step 15 involves the actual encryption.
-        let encrypted = CEA::encrypt(
+        let res = CEA::encrypt(
             &cek,
             &payload,
-            iv,
+            &iv,
             encoded_protected_header.as_bytes().to_vec(),
         )?;
 
         // Finally create the JWE
         Ok(Encrypted {
-            header_base64: encoded_protected_header.into_owned(),
             header,
+            res,
             encrypted_cek,
-            iv: encrypted.nonce,
-            encrypted_payload: encrypted.encrypted,
-            tag: encrypted.tag,
         })
     }
 }
@@ -890,7 +883,10 @@ mod tests {
 
         // Modify the JWE
         encrypted_jwe.header.kma.nonce = vec![0; 96 / 8];
-        encrypted_jwe.header_base64 = encrypted_jwe.header.to_base64().unwrap().into_owned();
+        encrypted_jwe.res.data.splice(
+            ..encrypted_jwe.res.nonce,
+            encrypted_jwe.header.to_base64().unwrap().bytes(),
+        );
 
         // Decrypt
         encrypted_jwe
@@ -916,7 +912,10 @@ mod tests {
 
         // Modify the JWE
         encrypted_jwe.header.kma.tag = vec![0; 96 / 8];
-        encrypted_jwe.header_base64 = encrypted_jwe.header.to_base64().unwrap().into_owned();
+        encrypted_jwe.res.data.splice(
+            ..encrypted_jwe.res.nonce,
+            encrypted_jwe.header.to_base64().unwrap().bytes(),
+        );
 
         // Decrypt
         let _token: Decrypted<Vec<u8>, ()> =
@@ -940,7 +939,7 @@ mod tests {
             .unwrap();
 
         // Modify the JWE
-        encrypted_jwe.tag = vec![0];
+        encrypted_jwe.res.data.splice(encrypted_jwe.res.tag.., [0]);
 
         // Decrypt
         let _token: Decrypted<Vec<u8>, ()> =
@@ -966,7 +965,10 @@ mod tests {
 
         // Modify the JWE
         encrypted_jwe.header.registered.media_type = Some("JOSE+JSON".to_string());
-        encrypted_jwe.header_base64 = encrypted_jwe.header.to_base64().unwrap().into_owned();
+        encrypted_jwe.res.data.splice(
+            ..encrypted_jwe.res.nonce,
+            encrypted_jwe.header.to_base64().unwrap().bytes(),
+        );
 
         // Decrypt
         let _token: Decrypted<Vec<u8>, ()> =
@@ -1016,7 +1018,11 @@ mod tests {
             .unwrap();
 
         // Modify the JWE
-        encrypted_jwe.encrypted_payload = vec![0u8; 32];
+        encrypted_jwe
+            .res
+            .data
+            .splice(encrypted_jwe.res.payload..encrypted_jwe.res.tag, [0; 32]);
+        encrypted_jwe.res.tag = encrypted_jwe.res.payload + 32;
 
         // Decrypt
         let _token: Decrypted<Vec<u8>, ()> =
@@ -1041,7 +1047,10 @@ mod tests {
             .unwrap();
 
         // Modify the JWE
-        encrypted_jwe.iv = vec![0u8; 96 / 8];
+        encrypted_jwe.res.data.splice(
+            encrypted_jwe.res.nonce..encrypted_jwe.res.payload,
+            [0; 96 / 8],
+        );
 
         // Decrypt
         let _token: Decrypted<Vec<u8>, ()> =

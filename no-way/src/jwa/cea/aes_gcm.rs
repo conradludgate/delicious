@@ -55,23 +55,26 @@ macro_rules! aes_gcm {
             pub(crate) fn encrypt_inner(
                 cek: &[u8],
                 payload: &[u8],
-                iv: Vec<u8>,
+                iv: &[u8],
                 aad: Vec<u8>,
             ) -> Result<EncryptionResult, Error> {
+                let mut output = EncryptionResult::new_with_aad(aad);
+                output.push_nonce(iv);
+                output.push_payload_with_padded_len(payload, payload.len());
+
                 let cipher =
                     ::aes_gcm::AesGcm::<$aes, aes::cipher::consts::U12>::new_from_slice(&cek)?;
+
+                let (rest, payload) = output.data.split_at_mut(output.payload);
+                let (aad, _) = rest.split_at(output.nonce);
+
                 let nonce: &::aes_gcm::Nonce<_> = from_slice(&iv)?;
-                let mut payload = payload.to_vec();
                 let tag = cipher
-                    .encrypt_in_place_detached(nonce, &aad, &mut payload)
-                    .map_err(|_| Error::UnspecifiedCryptographicError)?
-                    .to_vec();
-                Ok(EncryptionResult {
-                    nonce: iv,
-                    encrypted: payload,
-                    tag,
-                    additional_data: aad,
-                })
+                    .encrypt_in_place_detached(nonce, &aad, payload)
+                    .map_err(|_| Error::UnspecifiedCryptographicError)?;
+                output.push_tag(&tag);
+
+                Ok(output)
             }
 
             pub(crate) fn decrypt_inner(
@@ -108,20 +111,20 @@ macro_rules! aes_gcm {
             fn encrypt(
                 cek: &Self::Cek,
                 payload: &[u8],
-                iv: Vec<u8>,
+                iv: &[u8],
                 aad: Vec<u8>,
             ) -> Result<EncryptionResult, Error> {
                 Self::encrypt_inner(&cek.value, payload, iv, aad)
             }
 
             fn decrypt(cek: &Self::Cek, res: &EncryptionResult) -> Result<Vec<u8>, Error> {
-                let EncryptionResult {
-                    nonce,
-                    encrypted,
-                    tag,
-                    additional_data: aad,
-                } = res;
-                Self::decrypt_inner(&cek.value, &encrypted, &nonce, &tag, &aad)
+                Self::decrypt_inner(
+                    &cek.value,
+                    res.encrypted_payload(),
+                    res.nonce(),
+                    res.tag(),
+                    res.aad(),
+                )
             }
         }
     };
@@ -171,7 +174,7 @@ mod tests {
     fn aes_gcm_128_encryption_round_trip_fixed_key_nonce() {
         let payload = "这个世界值得我们奋战！";
         let key = OctetKey::new(vec![0; 128 / 8]);
-        cea_round_trip::<A128GCM>(&key, payload.as_bytes(), vec![0; 12], nonce());
+        cea_round_trip::<A128GCM>(&key, payload.as_bytes(), &[0; 12], nonce());
     }
 
     #[test]
@@ -179,14 +182,14 @@ mod tests {
         let payload = "这个世界值得我们奋战！";
         let key = OctetKey::new(random_vec(128 / 8));
 
-        cea_round_trip::<A128GCM>(&key, payload.as_bytes(), vec![0; 12], nonce());
+        cea_round_trip::<A128GCM>(&key, payload.as_bytes(), &[0; 12], nonce());
     }
 
     #[test]
     fn aes_gcm_192_encryption_round_trip_fixed_key_nonce() {
         let payload = "这个世界值得我们奋战！";
         let key = OctetKey::new(vec![0; 192 / 8]);
-        cea_round_trip::<A192GCM>(&key, payload.as_bytes(), vec![0; 12], nonce());
+        cea_round_trip::<A192GCM>(&key, payload.as_bytes(), &[0; 12], nonce());
     }
 
     #[test]
@@ -194,7 +197,7 @@ mod tests {
         let payload = "这个世界值得我们奋战！";
         let key = OctetKey::new(random_vec(192 / 8));
 
-        cea_round_trip::<A192GCM>(&key, payload.as_bytes(), vec![0; 12], nonce());
+        cea_round_trip::<A192GCM>(&key, payload.as_bytes(), &[0; 12], nonce());
     }
 
     #[test]
@@ -202,7 +205,7 @@ mod tests {
         let payload = "这个世界值得我们奋战！";
         let key = OctetKey::new(vec![0; 256 / 8]);
 
-        cea_round_trip::<A256GCM>(&key, payload.as_bytes(), vec![0; 12], nonce());
+        cea_round_trip::<A256GCM>(&key, payload.as_bytes(), &[0; 12], nonce());
     }
 
     #[test]
@@ -210,16 +213,16 @@ mod tests {
         let payload = "这个世界值得我们奋战！";
         let key = OctetKey::new(random_vec(256 / 8));
 
-        cea_round_trip::<A256GCM>(&key, payload.as_bytes(), vec![0; 12], nonce());
+        cea_round_trip::<A256GCM>(&key, payload.as_bytes(), &[0; 12], nonce());
     }
 
-    fn cea_round_trip<C: CEA>(key: &C::Cek, payload: &[u8], iv: Vec<u8>, aad: Vec<u8>)
+    fn cea_round_trip<C: CEA>(key: &C::Cek, payload: &[u8], iv: &[u8], aad: Vec<u8>)
     where
         C::Cek: Clone + PartialEq + std::fmt::Debug,
     {
         let res = C::encrypt(key, payload, iv, aad).unwrap();
         let output = C::decrypt(key, &res).unwrap();
-        assert_ne!(res.encrypted, payload);
+        assert_ne!(res.encrypted_payload(), payload);
         assert_eq!(output, payload);
     }
 }

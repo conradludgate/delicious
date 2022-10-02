@@ -68,7 +68,7 @@ macro_rules! aes_cbc {
             fn encrypt(
                 cek: &Self::Cek,
                 payload: &[u8],
-                iv: Vec<u8>,
+                iv: &[u8],
                 aad: Vec<u8>,
             ) -> Result<EncryptionResult, Error> {
                 use aes::cipher::KeyIvInit;
@@ -80,55 +80,48 @@ macro_rules! aes_cbc {
 
                 let (mac_key, enc_key) = cek.value.split_at($key_len);
 
+                let mut output = EncryptionResult::new_with_aad(aad);
+                output.push_nonce(iv);
+
+                let bs = <$aes as cipher::BlockSizeUser>::block_size();
+                let padded_len = bs * (payload.len() / bs + 1);
+                output.push_payload_with_padded_len(payload, padded_len);
+
                 // encrypt the payload using aes-cbc
-                let encrypted = cbc::Encryptor::<$aes>::new_from_slices(enc_key, &iv)?
-                    .encrypt_padded_vec_mut::<Pkcs7>(payload);
+                cbc::Encryptor::<$aes>::new_from_slices(enc_key, &iv)?
+                    .encrypt_padded_mut::<Pkcs7>(&mut output.data[output.payload..], payload.len())
+                    .expect("enough space for encrypting is allocated");
 
                 // compute the hmac
                 let tag = Hmac::<$sha>::new_from_slice(mac_key)?
-                    .chain_update(&aad)
-                    .chain_update(&iv)
-                    .chain_update(&encrypted)
-                    .chain_update(&(aad.len() as u64 * 8).to_be_bytes())
+                    .chain_update(&output.data)
+                    .chain_update(&(output.nonce as u64 * 8).to_be_bytes())
                     .finalize()
-                    .into_bytes()[..$key_len]
-                    .to_vec();
+                    .into_bytes();
 
-                Ok(EncryptionResult {
-                    nonce: iv,
-                    encrypted,
-                    tag,
-                    additional_data: aad,
-                })
+                output.push_tag(&tag[..$key_len]);
+
+                Ok(output)
             }
 
             fn decrypt(cek: &Self::Cek, res: &EncryptionResult) -> Result<Vec<u8>, Error> {
                 use aes::cipher::KeyIvInit;
                 use hmac::Mac;
 
-                let EncryptionResult {
-                    nonce,
-                    encrypted,
-                    tag,
-                    additional_data: aad,
-                } = res;
-
-                if cek.value.len() != $key_len * 2 || tag.len() != $key_len {
+                if cek.value.len() != $key_len * 2 || res.tag().len() != $key_len {
                     return Err(Error::UnspecifiedCryptographicError);
                 }
                 let (mac_key, enc_key) = cek.value.split_at($key_len);
 
                 // validate the hmac
                 Hmac::<$sha>::new_from_slice(mac_key)?
-                    .chain_update(&aad)
-                    .chain_update(&nonce)
-                    .chain_update(&encrypted)
-                    .chain_update(&(aad.len() as u64 * 8).to_be_bytes())
-                    .verify_truncated_left(&tag)?;
+                    .chain_update(&res.data[..res.tag])
+                    .chain_update(&(res.aad().len() as u64 * 8).to_be_bytes())
+                    .verify_truncated_left(&res.tag())?;
 
                 // decrypt the payload using aes-cbc
-                let decrypted = cbc::Decryptor::<$aes>::new_from_slices(enc_key, &nonce)?
-                    .decrypt_padded_vec_mut::<Pkcs7>(&encrypted)?;
+                let decrypted = cbc::Decryptor::<$aes>::new_from_slices(enc_key, res.nonce())?
+                    .decrypt_padded_vec_mut::<Pkcs7>(res.encrypted_payload())?;
                 Ok(decrypted)
             }
         }
@@ -250,12 +243,12 @@ mod tests {
             "4b 65 72 63 6b 68 6f 66 66 73"
         );
 
-        let res = C::encrypt(key, &payload, iv.to_vec(), aad.to_vec()).unwrap();
+        let res = C::encrypt(key, &payload, &iv, aad.to_vec()).unwrap();
 
-        assert_eq!(res.nonce, iv);
-        assert_eq!(res.additional_data, aad);
-        assert_eq!(res.encrypted, enc);
-        assert_eq!(res.tag, tag);
+        assert_eq!(res.aad(), aad);
+        assert_eq!(res.nonce(), iv);
+        assert_eq!(res.encrypted_payload(), enc);
+        assert_eq!(res.tag(), tag);
 
         let output = C::decrypt(key, &res).unwrap();
         assert_eq!(output, payload);

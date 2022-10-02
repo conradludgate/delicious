@@ -58,12 +58,12 @@ macro_rules! aes_gcm {
                 key: &Self::Key,
                 settings: Self::WrapSettings,
             ) -> Result<(Vec<u8>, Self::Header), Error> {
-                let res = Self::encrypt_inner(&key.value, &cek.value, settings, Vec::new())?;
+                let res = Self::encrypt_inner(&key.value, &cek.value, &settings, Vec::new())?;
                 let header = AesGcmKwHeader {
-                    nonce: res.nonce,
-                    tag: res.tag,
+                    nonce: res.nonce().to_vec(),
+                    tag: res.tag().to_vec(),
                 };
-                Ok((res.encrypted, header))
+                Ok((res.encrypted_payload().to_vec(), header))
             }
 
             fn unwrap(

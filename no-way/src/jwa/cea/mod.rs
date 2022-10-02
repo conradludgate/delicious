@@ -23,7 +23,7 @@ pub trait CEA {
     fn encrypt(
         cek: &Self::Cek,
         payload: &[u8],
-        iv: Vec<u8>,
+        iv: &[u8],
         aad: Vec<u8>,
     ) -> Result<EncryptionResult, Error>;
 
@@ -32,17 +32,56 @@ pub trait CEA {
 }
 
 /// The result returned from an encryption operation
-// TODO: Might have to turn this into an enum
+/// 
+/// This is a more internal focused type. 
+/// It's compressed as [AAD,NONCE,PAYLOAD,TAG] all in 1 vec to avoid having
+/// multiple allocations.
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub struct EncryptionResult {
-    /// The initialization vector, or nonce used in the encryption
-    pub nonce: Vec<u8>,
-    /// The encrypted payload
-    pub encrypted: Vec<u8>,
-    /// The authentication tag
-    pub tag: Vec<u8>,
-    /// Additional authenticated data that is integrity protected but not encrypted
-    pub additional_data: Vec<u8>,
+    pub(crate) data: Vec<u8>,
+    pub(crate) nonce: usize,
+    pub(crate) payload: usize,
+    pub(crate) tag: usize,
+}
+
+impl EncryptionResult {
+    pub(crate) fn new_with_aad(aad: Vec<u8>) -> Self {
+        Self {
+            nonce: aad.len(),
+            payload: aad.len(),
+            tag: aad.len(),
+            data: aad,
+        }
+    }
+    pub(crate) fn push_nonce(&mut self, nonce: &[u8]) {
+        debug_assert_eq!(self.nonce, self.data.len(), "You pushed the payload or tag before the nonce");
+        self.data.extend_from_slice(nonce);
+        self.payload = self.data.len();
+        self.tag = self.data.len();
+    }
+    pub(crate) fn push_payload_with_padded_len(&mut self, payload: &[u8], padded_len: usize) {
+        debug_assert_eq!(self.payload, self.data.len(), "You pushed the tag before the payload");
+        self.data.extend_from_slice(payload);
+        self.data.resize(self.payload+padded_len, 0);
+        self.tag = self.data.len();
+    }
+    pub(crate) fn push_tag(&mut self, tag: &[u8]) {
+        debug_assert_eq!(self.tag, self.data.len(), "You pushed the tag already");
+        self.data.extend_from_slice(tag);
+    }
+
+    pub fn aad(&self) -> &[u8] {
+        &self.data[..self.nonce]
+    }
+    pub fn nonce(&self) -> &[u8] {
+        &self.data[self.nonce..self.payload]
+    }
+    pub fn encrypted_payload(&self) -> &[u8] {
+        &self.data[self.payload..self.tag]
+    }
+    pub fn tag(&self) -> &[u8] {
+        &self.data[self.tag..]
+    }
 }
 
 /// Algorithms meant for content encryption.
@@ -62,7 +101,6 @@ pub enum Algorithm {
     /// AES GCM using 128-bit key
     A128GCM,
     /// AES GCM using 192-bit key
-    /// This is [not supported](https://github.com/briansmith/ring/issues/112) by `ring`.
     A192GCM,
     /// AES GCM using 256-bit key
     A256GCM,
