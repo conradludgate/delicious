@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
-use aes::cipher::{BlockDecryptMut, BlockEncryptMut};
+use aes::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use cipher::block_padding::Pkcs7;
-use hmac::Hmac;
+use hmac::{Hmac, Mac};
 
 use super::{Algorithm, EncryptionResult, CEA};
 use crate::{errors::Error, jwk::OctetKey};
@@ -71,21 +71,19 @@ macro_rules! aes_cbc {
                 iv: &[u8],
                 aad: Vec<u8>,
             ) -> Result<EncryptionResult, Error> {
-                use aes::cipher::KeyIvInit;
-                use hmac::Mac;
-
                 if cek.value.len() != $key_len * 2 {
                     return Err(Error::UnspecifiedCryptographicError);
                 }
 
                 let (mac_key, enc_key) = cek.value.split_at($key_len);
 
-                let mut output = EncryptionResult::new_with_aad(aad);
-                output.push_nonce(iv);
-
                 let bs = <$aes as cipher::BlockSizeUser>::block_size();
                 let padded_len = bs * (payload.len() / bs + 1);
-                output.push_payload_with_padded_len(payload, padded_len);
+
+                // padded_len >= payload.len()
+                let mut output = unsafe {
+                    EncryptionResult::new_without_tag(aad, iv, payload, padded_len, $key_len)
+                };
 
                 // encrypt the payload using aes-cbc
                 cbc::Encryptor::<$aes>::new_from_slices(enc_key, &iv)?
@@ -99,15 +97,13 @@ macro_rules! aes_cbc {
                     .finalize()
                     .into_bytes();
 
-                output.push_tag(&tag[..$key_len]);
+                // tag is guaranteed to be $key_len
+                unsafe { output.push_tag(&tag[..$key_len]) }
 
                 Ok(output)
             }
 
             fn decrypt(cek: &Self::Cek, res: &EncryptionResult) -> Result<Vec<u8>, Error> {
-                use aes::cipher::KeyIvInit;
-                use hmac::Mac;
-
                 if cek.value.len() != $key_len * 2 || res.tag().len() != $key_len {
                     return Err(Error::UnspecifiedCryptographicError);
                 }

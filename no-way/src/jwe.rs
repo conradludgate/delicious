@@ -4,7 +4,7 @@
 //! Most commonly, JWE is used to encrypt a JWS payload, which is a signed JWT. For most common use,
 //! you will want to look at the  [`Compact`](enum.Compact.html) enum.
 use std::borrow::Cow;
-use std::fmt;
+use std::fmt::{self, Write};
 use std::marker::PhantomData;
 use std::str::FromStr;
 
@@ -12,7 +12,7 @@ use rand::RngCore;
 use serde::de::{self, DeserializeOwned};
 use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::errors::{Error, ValidationError};
+use crate::errors::{DecodeError, Error, ValidationError};
 use crate::jwa::cea::EncryptionResult;
 use crate::jwa::{self, cea, kma};
 use crate::{FromCompactPart, ToCompactPart};
@@ -260,7 +260,7 @@ impl<KMA: kma::KMA, H: Serialize> Serialize for Encrypted<KMA, H> {
     where
         S: Serializer,
     {
-        serializer.serialize_str(self.to_string().as_str())
+        serializer.collect_str(self)
     }
 }
 
@@ -292,9 +292,10 @@ impl<'de, KMA: kma::KMA, H: DeserializeOwned> Deserialize<'de> for Encrypted<KMA
 
 impl<KMA: kma::KMA, H> fmt::Display for Encrypted<KMA, H> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(
-            std::str::from_utf8(self.res.aad()).expect("we only write base64 strings in here"),
-        )?;
+        // safety, we only write ascii base64 into this field
+        let s = unsafe { std::str::from_utf8_unchecked(self.res.aad()) };
+        f.write_str(s)?;
+
         let mut buf = [0; 1024];
         let parts = [
             &self.encrypted_cek,
@@ -303,11 +304,9 @@ impl<KMA: kma::KMA, H> fmt::Display for Encrypted<KMA, H> {
             self.res.tag(),
         ];
         for part in parts {
-            f.write_str(".")?;
+            f.write_char('.')?;
             for chunk in part.chunks(1024 / 4 * 3) {
-                let n = base64::encode_config_slice(chunk, base64::URL_SAFE_NO_PAD, &mut buf);
-                let s = unsafe { std::str::from_utf8_unchecked(&buf[..n]) };
-                f.write_str(s)?;
+                f.write_str(crate::base64_encode_slice(chunk, &mut buf))?;
             }
         }
         Ok(())
@@ -322,41 +321,50 @@ where
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut sections = [""; 5];
-        let mut split = s.split('.');
-        for (i, section) in sections.iter_mut().enumerate() {
-            *section = split.next().ok_or(Error::DecodeError(
-                crate::errors::DecodeError::PartsLengthError {
-                    expected: 5,
-                    actual: i,
-                },
-            ))?;
+        fn decode(output: &mut [u8], input: &str, n: usize) -> Result<usize, base64::DecodeError> {
+            let input = input.as_bytes();
+            Ok(base64::decode_config_slice(input, base64::URL_SAFE_NO_PAD, &mut output[n..])? + n)
         }
-        let rest = split.count();
-        if rest > 0 {
-            return Err(Error::DecodeError(
-                crate::errors::DecodeError::PartsLengthError {
+
+        // decodes the JWE using minimal allocations
+
+        let sections: arrayvec::ArrayVec<_, 5> = s.splitn(5, '.').collect();
+        let [headerb64, cek, iv, payload, tag] = match sections.into_inner() {
+            Ok(s) => s,
+            Err(a) => {
+                return Err(Error::DecodeError(DecodeError::PartsLengthError {
                     expected: 5,
-                    actual: 5 + rest,
-                },
-            ));
-        }
-        let [header_base64, cek, iv, payload, tag] = sections;
+                    actual: a.len(),
+                }))
+            }
+        };
 
-        let header = base64::decode_config(header_base64, base64::URL_SAFE_NO_PAD)?;
-        let header = serde_json::from_slice(&header)?;
+        let len = headerb64.len() + (iv.len() + payload.len() + tag.len() + 9) * 3 / 4;
+        let len = len.max((headerb64.len() + 3) * 3 / 4);
+        let mut data = vec![0; len];
 
-        let mut res = EncryptionResult::new_with_aad(header_base64.as_bytes().to_vec());
-        base64::decode_config_buf(iv, base64::URL_SAFE_NO_PAD, &mut res.data)?;
-        res.payload = res.data.len();
-        base64::decode_config_buf(payload, base64::URL_SAFE_NO_PAD, &mut res.data)?;
-        res.tag = res.data.len();
-        base64::decode_config_buf(tag, base64::URL_SAFE_NO_PAD, &mut res.data)?;
+        // first, use the alloc space as scratch space for the header deser
+        let n = decode(&mut data, headerb64, 0)?;
+        let header = serde_json::from_slice(&data[..n])?;
+
+        // then build the compressed encrypted result [aad,iv,payload,tag]
+        // where aad=headerb64
+        data[..headerb64.len()].copy_from_slice(headerb64.as_bytes());
+        let nonce = headerb64.len();
+        let p_idx = decode(&mut data, iv, nonce)?;
+        let tag_idx = decode(&mut data, payload, p_idx)?;
+        let len = decode(&mut data, tag, tag_idx)?;
+        data.truncate(len);
 
         Ok(Self {
             header,
             encrypted_cek: Vec::from_base64(cek)?,
-            res,
+            res: EncryptionResult {
+                data,
+                nonce,
+                payload: p_idx,
+                tag: tag_idx,
+            },
         })
     }
 }

@@ -36,8 +36,14 @@ ecdsa = "0.14.8"
 signature = "1.6.3"
 elliptic-curve = "0.12.3"
 sec1 = "0.3.0"
+arrayvec = "0.7.2"
 
 [dev-dependencies]
 serde_test = "1.0"
 hex-literal = "0.3"
 hex = "0.4"
+criterion = { version = "0.4.0", features = ["html_reports"] }
+
+[[bench]]
+name = "no_way"
+harness = false

@@ -46,7 +46,7 @@ impl<T, H> Serialize for Unverified<T, H> {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(self.to_string().as_str())
+        serializer.collect_str(self)
     }
 }
 
@@ -84,9 +84,7 @@ impl<T, H> fmt::Display for Unverified<T, H> {
         f.write_str(".")?;
         let mut buf = [0; 1024];
         for chunk in self.signature.chunks(1024 / 4 * 3) {
-            let n = base64::encode_config_slice(chunk, base64::URL_SAFE_NO_PAD, &mut buf);
-            let s = unsafe { std::str::from_utf8_unchecked(&buf[..n]) };
-            f.write_str(s)?;
+            f.write_str(crate::base64_encode_slice(chunk, &mut buf))?;
         }
         Ok(())
     }
@@ -107,8 +105,6 @@ where
             },
         ))?;
 
-        let signature = base64::decode_config(sig, base64::URL_SAFE_NO_PAD)?;
-
         let (header, payload) = payload_base64.split_once('.').ok_or(Error::DecodeError(
             crate::errors::DecodeError::PartsLengthError {
                 expected: 3,
@@ -116,8 +112,8 @@ where
             },
         ))?;
 
-        let header = base64::decode_config(header, base64::URL_SAFE_NO_PAD)?;
-        let header = serde_json::from_slice(&header)?;
+        let signature = Vec::from_base64(sig)?;
+        let header = Header::from_base64(header)?;
         let payload = T::from_base64(payload)?;
 
         Ok(Self {

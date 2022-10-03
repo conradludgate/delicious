@@ -209,9 +209,15 @@ mod serde_impl {
                         b"A128GCMKW" => Algorithm::AesGcmKw(AesGcmKwAlgorithm::A128),
                         b"A192GCMKW" => Algorithm::AesGcmKw(AesGcmKwAlgorithm::A192),
                         b"A256GCMKW" => Algorithm::AesGcmKw(AesGcmKwAlgorithm::A256),
-                        b"PBES2-HS256+A128KW" => Algorithm::Pbes2(Pbes2Algorithm::HS256_A128KW),
-                        b"PBES2-HS384+A192KW" => Algorithm::Pbes2(Pbes2Algorithm::HS384_A192KW),
-                        b"PBES2-HS512+A256KW" => Algorithm::Pbes2(Pbes2Algorithm::HS512_A256KW),
+                        b"PBES2-HS256+A128KW" => {
+                            Algorithm::Pbes2(Pbes2Algorithm::PBES2_HS256_A128KW)
+                        }
+                        b"PBES2-HS384+A192KW" => {
+                            Algorithm::Pbes2(Pbes2Algorithm::PBES2_HS384_A192KW)
+                        }
+                        b"PBES2-HS512+A256KW" => {
+                            Algorithm::Pbes2(Pbes2Algorithm::PBES2_HS512_A256KW)
+                        }
                         _ => {
                             let value = String::from_utf8_lossy(value);
                             return Err(serde::de::Error::unknown_variant(&value, VARIANTS));
@@ -286,9 +292,9 @@ mod serde_impl {
                 Algorithm::AesGcmKw(AesGcmKwAlgorithm::A128) => "A128GCMKW",
                 Algorithm::AesGcmKw(AesGcmKwAlgorithm::A192) => "A192GCMKW",
                 Algorithm::AesGcmKw(AesGcmKwAlgorithm::A256) => "A256GCMKW",
-                Algorithm::Pbes2(Pbes2Algorithm::HS256_A128KW) => "PBES2-HS256+A128KW",
-                Algorithm::Pbes2(Pbes2Algorithm::HS384_A192KW) => "PBES2-HS384+A192KW",
-                Algorithm::Pbes2(Pbes2Algorithm::HS512_A256KW) => "PBES2-HS512+A256KW",
+                Algorithm::Pbes2(Pbes2Algorithm::PBES2_HS256_A128KW) => "PBES2-HS256+A128KW",
+                Algorithm::Pbes2(Pbes2Algorithm::PBES2_HS384_A192KW) => "PBES2-HS384+A192KW",
+                Algorithm::Pbes2(Pbes2Algorithm::PBES2_HS512_A256KW) => "PBES2-HS512+A256KW",
             }
         }
     }
@@ -313,9 +319,9 @@ mod serde_impl {
                 Algorithm::AesGcmKw(AesGcmKwAlgorithm::A128) => 11u32,
                 Algorithm::AesGcmKw(AesGcmKwAlgorithm::A192) => 12u32,
                 Algorithm::AesGcmKw(AesGcmKwAlgorithm::A256) => 13u32,
-                Algorithm::Pbes2(Pbes2Algorithm::HS256_A128KW) => 14u32,
-                Algorithm::Pbes2(Pbes2Algorithm::HS384_A192KW) => 15u32,
-                Algorithm::Pbes2(Pbes2Algorithm::HS512_A256KW) => 16u32,
+                Algorithm::Pbes2(Pbes2Algorithm::PBES2_HS256_A128KW) => 14u32,
+                Algorithm::Pbes2(Pbes2Algorithm::PBES2_HS384_A192KW) => 15u32,
+                Algorithm::Pbes2(Pbes2Algorithm::PBES2_HS512_A256KW) => 16u32,
             };
             serializer.serialize_unit_variant("KeyManagementAlgorithm", idx, self.as_str())
         }

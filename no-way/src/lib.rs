@@ -860,6 +860,12 @@ impl<T: Serialize> ToCompactPart for ClaimsSet<T> {
     }
 }
 
+/// helper to base64 encode into a pre-allocated buffer
+fn base64_encode_slice<'a>(input: &[u8], output: &'a mut [u8]) -> &'a str {
+    let n = base64::encode_config_slice(input, base64::URL_SAFE_NO_PAD, output);
+    unsafe { std::str::from_utf8_unchecked(&output[..n]) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

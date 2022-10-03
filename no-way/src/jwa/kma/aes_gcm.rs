@@ -24,13 +24,12 @@ pub enum AesGcmKwAlgorithm {
 /// * [`A256GCMKW`](crate::jwa::kma::A256GCMKW) - Key wrapping with AES GCM using 256-bit key
 pub type AesGcmKw<Aes> = AesGcm<Aes>;
 
-#[allow(non_camel_case_types)]
 /// Key wrapping with AES GCM using 128-bit key
 pub type A128GCMKW = AesGcmKw<aes::Aes128>;
-#[allow(non_camel_case_types)]
+
 /// Key wrapping with AES GCM using 192-bit key
 pub type A192GCMKW = AesGcmKw<aes::Aes192>;
-#[allow(non_camel_case_types)]
+
 /// Key wrapping with AES GCM using 256-bit key
 pub type A256GCMKW = AesGcmKw<aes::Aes256>;
 

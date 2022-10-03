@@ -16,11 +16,11 @@ use super::KMA;
 #[allow(non_camel_case_types)]
 pub enum Pbes2Algorithm {
     /// PBES2 with HMAC SHA-256 and "A128KW" wrapping
-    HS256_A128KW,
+    PBES2_HS256_A128KW,
     /// PBES2 with HMAC SHA-384 and "A192KW" wrapping
-    HS384_A192KW,
+    PBES2_HS384_A192KW,
     /// PBES2 with HMAC SHA-512 and "A256KW" wrapping
-    HS512_A256KW,
+    PBES2_HS512_A256KW,
 }
 
 impl From<Pbes2Algorithm> for super::Algorithm {
@@ -43,27 +43,25 @@ fn aes_key_wrap<T: BlockSizeUser + BlockEncryptMut>(mut cipher: T, out: &mut [u8
         for i in 1..=n {
             let ri = &mut out[i * 8..i * 8 + 8];
 
-            // A | R[i]
-            let mut input = [0; 32];
-            input[..8].copy_from_slice(&a.to_be_bytes());
-            input[8..16].copy_from_slice(ri);
+            let mut block64 = [0u64; 4];
+            let block = bytemuck::cast_slice_mut(&mut block64);
 
-            let mut out2 = [0u64; 4];
-            let out_block = bytemuck::cast_slice_mut(&mut out2);
+            // A | R[i]
+            block[..8].copy_from_slice(&a.to_be_bytes());
+            block[8..16].copy_from_slice(ri);
 
             // B = AES(K, A | R[i])
-            let in_block = Block::<T>::from_slice(&input[..block_size]);
-            let out_block = Block::<T>::from_mut_slice(&mut out_block[..block_size]);
-            cipher.encrypt_block_b2b_mut(in_block, out_block);
+            let block = Block::<T>::from_mut_slice(&mut block[..block_size]);
+            cipher.encrypt_block_mut(block);
 
             // A = MSB(64, B) ^ t where t = (n*j)+i
             let t = n * j + i;
-            a = out2[0].to_be() ^ t as u64;
+            a = block64[0].to_be() ^ t as u64;
 
             // R[i] = LSB(64, B)
             let lsb = block_size / 8;
             let lsb = lsb - 1..lsb;
-            ri.copy_from_slice(bytemuck::cast_slice(&out2[lsb]));
+            ri.copy_from_slice(bytemuck::cast_slice(&block64[lsb]));
         }
     }
     // Set C[0] = A
@@ -86,27 +84,25 @@ fn aes_key_unwrap<T: BlockSizeUser + BlockDecryptMut>(
         for i in (1..=n).rev() {
             let ri = &mut out[i * 8..i * 8 + 8];
 
-            // (A ^ t) | R[i] where t = (n*j)+i
-            let mut input = [0; 32];
-            let t = n * j + i;
-            input[..8].copy_from_slice(&(a ^ t as u64).to_be_bytes());
-            input[8..16].copy_from_slice(ri);
+            let mut block64 = [0u64; 4];
+            let block = bytemuck::cast_slice_mut(&mut block64);
 
-            let mut out2 = [0u64; 4];
-            let out_block = bytemuck::cast_slice_mut(&mut out2);
+            // (A ^ t) | R[i] where t = (n*j)+i
+            let t = n * j + i;
+            block[..8].copy_from_slice(&(a ^ t as u64).to_be_bytes());
+            block[8..16].copy_from_slice(ri);
 
             // B = AES-1(K, (A ^ t) | R[i])
-            let in_block = Block::<T>::from_slice(&input[..block_size]);
-            let out_block2 = Block::<T>::from_mut_slice(&mut out_block[..block_size]);
-            cipher.decrypt_block_b2b_mut(in_block, out_block2);
+            let block = Block::<T>::from_mut_slice(&mut block[..block_size]);
+            cipher.decrypt_block_mut(block);
 
             // A = MSB(64, B)
-            a = out2[0].to_be();
+            a = block64[0].to_be();
 
             // R[i] = LSB(64, B)
             let lsb = block_size / 8;
             let lsb = lsb - 1..lsb;
-            ri.copy_from_slice(bytemuck::cast_slice(&out2[lsb]));
+            ri.copy_from_slice(bytemuck::cast_slice(&block64[lsb]));
         }
     }
     if a != AES_KW_IV {
@@ -119,15 +115,29 @@ fn aes_key_unwrap<T: BlockSizeUser + BlockDecryptMut>(
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Pbes2Header {
     #[serde(rename = "p2c")]
-    count: u32,
+    pub count: u32,
     #[serde(rename = "p2s")]
-    salt: Vec<u8>,
+    pub salt: Vec<u8>,
 }
 
 macro_rules! pbes2 {
-    ($id:ident, $sha:ty, $aes:ty, $name:ident, $key_len:expr) => {
+    ($id:ident, $sha:ty, $aes:ty, $key_len:expr) => {
+        impl $id {
+            fn kdf(key: &OctetKey, settings: &Pbes2Header) -> [u8; $key_len] {
+                let name = Self::ALG.as_str();
+                let mut salt = Vec::with_capacity(name.len() + 1 + settings.salt.len());
+                salt.extend_from_slice(name.as_bytes());
+                salt.push(0);
+                salt.extend_from_slice(&settings.salt);
+
+                let mut dk = [0; $key_len];
+                pbkdf2::pbkdf2::<Hmac<$sha>>(&key.value, &salt, settings.count, &mut dk);
+                dk
+            }
+        }
+
         impl KMA for $id {
-            const ALG: super::Algorithm = super::Algorithm::Pbes2(Pbes2Algorithm::$name);
+            const ALG: super::Algorithm = super::Algorithm::Pbes2(Pbes2Algorithm::$id);
             type Key = OctetKey;
             type Cek = OctetKey;
             type Header = Pbes2Header;
@@ -138,14 +148,7 @@ macro_rules! pbes2 {
                 key: &Self::Key,
                 settings: Self::WrapSettings,
             ) -> Result<(Vec<u8>, Self::Header), Error> {
-                let name = super::Algorithm::Pbes2(Pbes2Algorithm::$name).as_str();
-                let mut salt = Vec::with_capacity(name.len() + 1 + settings.salt.len());
-                salt.extend_from_slice(name.as_bytes());
-                salt.push(0);
-                salt.extend_from_slice(&settings.salt);
-
-                let mut dk = [0; $key_len];
-                pbkdf2::pbkdf2::<Hmac<$sha>>(&key.value, &salt, settings.count, &mut dk);
+                let dk = Self::kdf(key, &settings);
 
                 let payload = &cek.value;
                 let len = next_multiple_of_8(payload.len());
@@ -162,23 +165,14 @@ macro_rules! pbes2 {
                 key: &Self::Key,
                 settings: Self::Header,
             ) -> Result<Self::Cek, Error> {
-                let name = super::Algorithm::Pbes2(Pbes2Algorithm::$name).as_str();
-                let mut salt = Vec::with_capacity(name.len() + 1 + settings.salt.len());
-                salt.extend_from_slice(name.as_bytes());
-                salt.push(0);
-                salt.extend_from_slice(&settings.salt);
-
-                let mut dk = [0; $key_len];
-                pbkdf2::pbkdf2::<Hmac<$sha>>(&key.value, &salt, settings.count, &mut dk);
+                let dk = Self::kdf(key, &settings);
 
                 let len = next_multiple_of_8(encrypted_cek.len());
                 let mut out = vec![0; len];
                 out[..encrypted_cek.len()].copy_from_slice(encrypted_cek);
 
                 aes_key_unwrap(<$aes>::new_from_slice(&dk)?, &mut out)?;
-
-                out.rotate_left(8);
-                out.truncate(len - 8);
+                out.splice(..8, []);
 
                 Ok(OctetKey::new(out))
             }
@@ -231,27 +225,9 @@ pub type PBES2_HS384_A192KW = Pbes2<sha2::Sha384, Aes192>;
 /// PBES2 key management algorithm using SHA512 and AES256
 pub type PBES2_HS512_A256KW = Pbes2<sha2::Sha512, Aes256>;
 
-pbes2!(
-    PBES2_HS256_A128KW,
-    sha2::Sha256,
-    Aes128,
-    HS256_A128KW,
-    128 / 8
-);
-pbes2!(
-    PBES2_HS384_A192KW,
-    sha2::Sha384,
-    Aes192,
-    HS384_A192KW,
-    192 / 8
-);
-pbes2!(
-    PBES2_HS512_A256KW,
-    sha2::Sha512,
-    Aes256,
-    HS512_A256KW,
-    256 / 8
-);
+pbes2!(PBES2_HS256_A128KW, sha2::Sha256, Aes128, 128 / 8);
+pbes2!(PBES2_HS384_A192KW, sha2::Sha384, Aes192, 192 / 8);
+pbes2!(PBES2_HS512_A256KW, sha2::Sha512, Aes256, 256 / 8);
 
 fn next_multiple_of_8(x: usize) -> usize {
     (x + 7) & (!0b111)

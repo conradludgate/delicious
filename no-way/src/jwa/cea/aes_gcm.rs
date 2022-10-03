@@ -39,13 +39,12 @@ where
     }
 }
 
-#[allow(non_camel_case_types)]
 /// [Content Encryption with AES GCM using 128-bit key](https://datatracker.ietf.org/doc/html/rfc7518#section-5.3)
 pub type A128GCM = AesGcm<aes::Aes128>;
-#[allow(non_camel_case_types)]
+
 /// [Content Encryption with AES GCM using 192-bit key](https://datatracker.ietf.org/doc/html/rfc7518#section-5.3)
 pub type A192GCM = AesGcm<aes::Aes192>;
-#[allow(non_camel_case_types)]
+
 /// [Content Encryption with AES GCM using 256-bit key](https://datatracker.ietf.org/doc/html/rfc7518#section-5.3)
 pub type A256GCM = AesGcm<aes::Aes256>;
 
@@ -58,9 +57,10 @@ macro_rules! aes_gcm {
                 iv: &[u8],
                 aad: Vec<u8>,
             ) -> Result<EncryptionResult, Error> {
-                let mut output = EncryptionResult::new_with_aad(aad);
-                output.push_nonce(iv);
-                output.push_payload_with_padded_len(payload, payload.len());
+                // payload.len() is a valid payload_size
+                let mut output = unsafe {
+                    EncryptionResult::new_without_tag(aad, iv, payload, payload.len(), 16)
+                };
 
                 let cipher =
                     ::aes_gcm::AesGcm::<$aes, aes::cipher::consts::U12>::new_from_slice(&cek)?;
@@ -72,7 +72,9 @@ macro_rules! aes_gcm {
                 let tag = cipher
                     .encrypt_in_place_detached(nonce, &aad, payload)
                     .map_err(|_| Error::UnspecifiedCryptographicError)?;
-                output.push_tag(&tag);
+
+                // tag is guaranteed to be 16 bytes
+                unsafe { output.push_tag(&tag) }
 
                 Ok(output)
             }

@@ -32,8 +32,8 @@ pub trait CEA {
 }
 
 /// The result returned from an encryption operation
-/// 
-/// This is a more internal focused type. 
+///
+/// This is a more internal focused type.
 /// It's compressed as [AAD,NONCE,PAYLOAD,TAG] all in 1 vec to avoid having
 /// multiple allocations.
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
@@ -45,42 +45,70 @@ pub struct EncryptionResult {
 }
 
 impl EncryptionResult {
-    pub(crate) fn new_with_aad(aad: Vec<u8>) -> Self {
+    /// Creates the `EncryptionResult` with the 3 known values, and spare space for the tag.
+    ///
+    /// Safety: `payload_size` must be >= `payload.len()`
+    pub(crate) unsafe fn new_without_tag(
+        mut aad: Vec<u8>,
+        iv: &[u8],
+        payload: &[u8],
+        payload_size: usize,
+        tag_size: usize,
+    ) -> Self {
+        debug_assert!(payload_size >= payload.len());
+
+        let nonce_index = aad.len();
+        let payload_index = nonce_index + iv.len();
+        let tag = payload_index + payload_size;
+        aad.reserve(payload_size + iv.len() + tag_size);
+
+        // safety, writes into pre-alloc memory
+        {
+            let bytes = aad.spare_capacity_mut();
+            let mut p = bytes.as_mut_ptr().cast::<u8>();
+
+            p.copy_from_nonoverlapping(iv.as_ptr(), iv.len());
+            p = p.add(iv.len());
+            p.copy_from_nonoverlapping(payload.as_ptr(), payload.len());
+            p = p.add(payload.len());
+            p.write_bytes(0, payload_size - payload.len());
+
+            aad.set_len(tag);
+        }
+
         Self {
-            nonce: aad.len(),
-            payload: aad.len(),
-            tag: aad.len(),
+            nonce: nonce_index,
+            payload: payload_index,
+            tag,
             data: aad,
         }
     }
-    pub(crate) fn push_nonce(&mut self, nonce: &[u8]) {
-        debug_assert_eq!(self.nonce, self.data.len(), "You pushed the payload or tag before the nonce");
-        self.data.extend_from_slice(nonce);
-        self.payload = self.data.len();
-        self.tag = self.data.len();
-    }
-    pub(crate) fn push_payload_with_padded_len(&mut self, payload: &[u8], padded_len: usize) {
-        debug_assert_eq!(self.payload, self.data.len(), "You pushed the tag before the payload");
-        self.data.extend_from_slice(payload);
-        self.data.resize(self.payload+padded_len, 0);
-        self.tag = self.data.len();
-    }
-    pub(crate) fn push_tag(&mut self, tag: &[u8]) {
+    /// Adds the tag to the end of the buffer (without allocating)
+    ///
+    /// Safety: must have `tag_size` spare bytes available
+    /// (guaranteed if specifed in the [`new_without_tag`] call)
+    pub(crate) unsafe fn push_tag(&mut self, tag: &[u8]) {
         debug_assert_eq!(self.tag, self.data.len(), "You pushed the tag already");
-        self.data.extend_from_slice(tag);
+        let bytes = self.data.spare_capacity_mut();
+        debug_assert!(bytes.len() >= tag.len());
+
+        let p = bytes.as_mut_ptr().cast::<u8>();
+        p.copy_from_nonoverlapping(tag.as_ptr(), tag.len());
+
+        self.data.set_len(self.tag + tag.len());
     }
 
     pub fn aad(&self) -> &[u8] {
-        &self.data[..self.nonce]
+        unsafe { self.data.get_unchecked(..self.nonce) }
     }
     pub fn nonce(&self) -> &[u8] {
-        &self.data[self.nonce..self.payload]
+        unsafe { self.data.get_unchecked(self.nonce..self.payload) }
     }
     pub fn encrypted_payload(&self) -> &[u8] {
-        &self.data[self.payload..self.tag]
+        unsafe { self.data.get_unchecked(self.payload..self.tag) }
     }
     pub fn tag(&self) -> &[u8] {
-        &self.data[self.tag..]
+        unsafe { self.data.get_unchecked(self.tag..) }
     }
 }
 
