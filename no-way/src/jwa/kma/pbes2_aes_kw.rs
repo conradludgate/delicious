@@ -139,42 +139,35 @@ macro_rules! pbes2 {
         impl KMA for $id {
             const ALG: super::Algorithm = super::Algorithm::Pbes2(Pbes2Algorithm::$id);
             type Key = OctetKey;
-            type Cek = OctetKey;
             type Header = Pbes2Header;
             type WrapSettings = Pbes2Header;
 
             fn wrap(
-                cek: &Self::Cek,
+                cek: &[u8],
                 key: &Self::Key,
                 settings: Self::WrapSettings,
             ) -> Result<(Vec<u8>, Self::Header), Error> {
                 let dk = Self::kdf(key, &settings);
 
-                let payload = &cek.value;
-                let len = next_multiple_of_8(payload.len());
+                let len = next_multiple_of_8(cek.len());
                 let mut out = vec![0; len + 8];
-                out[8..][..payload.len()].copy_from_slice(payload);
+                out[8..][..cek.len()].copy_from_slice(cek);
 
                 aes_key_wrap(<$aes>::new_from_slice(&dk)?, &mut out);
 
                 Ok((out, settings))
             }
 
-            fn unwrap(
-                encrypted_cek: &[u8],
-                key: &Self::Key,
+            fn unwrap<'c>(
+                encrypted_cek: &'c mut [u8],
+                key: &'c Self::Key,
                 settings: Self::Header,
-            ) -> Result<Self::Cek, Error> {
+            ) -> Result<&'c [u8], Error> {
                 let dk = Self::kdf(key, &settings);
 
-                let len = next_multiple_of_8(encrypted_cek.len());
-                let mut out = vec![0; len];
-                out[..encrypted_cek.len()].copy_from_slice(encrypted_cek);
+                aes_key_unwrap(<$aes>::new_from_slice(&dk)?, encrypted_cek)?;
 
-                aes_key_unwrap(<$aes>::new_from_slice(&dk)?, &mut out)?;
-                out.splice(..8, []);
-
-                Ok(OctetKey::new(out))
+                Ok(&encrypted_cek[8..])
             }
         }
     };
@@ -383,13 +376,10 @@ mod tests {
     #[test]
     // https://www.rfc-editor.org/rfc/rfc7517.html#appendix-C.2
     fn pbes2_hs256_a128kw() {
-        let payload = OctetKey::new(
-            [
-                111, 27, 25, 52, 66, 29, 20, 78, 92, 176, 56, 240, 65, 208, 82, 112, 161, 131, 36,
-                55, 202, 236, 185, 172, 129, 23, 153, 194, 195, 48, 253, 182,
-            ]
-            .to_vec(),
-        );
+        let payload = [
+            111, 27, 25, 52, 66, 29, 20, 78, 92, 176, 56, 240, 65, 208, 82, 112, 161, 131, 36, 55,
+            202, 236, 185, 172, 129, 23, 153, 194, 195, 48, 253, 182,
+        ];
         let key = OctetKey::new(b"Thus from my lips, by yours, my sin is purged.".to_vec());
         let header = Pbes2Header {
             count: 4096,
@@ -407,19 +397,15 @@ mod tests {
     }
 
     fn kma_round_trip<K: KMA>(
-        payload: &K::Cek,
+        payload: &[u8],
         key: &K::Key,
         settings: K::WrapSettings,
         expected: &[u8],
-    ) where
-        K::Cek: PartialEq + std::fmt::Debug,
-    {
-        let (encrypted_cek, header) = K::wrap(payload, key, settings).unwrap();
-
+    ) {
+        let (mut encrypted_cek, header) = K::wrap(payload, key, settings).unwrap();
         assert_eq!(encrypted_cek, expected);
 
-        let decrypted_cek = K::unwrap(&encrypted_cek, key, header).unwrap();
-
-        assert_eq!(decrypted_cek, *payload);
+        let decrypted_cek = K::unwrap(&mut encrypted_cek, key, header).unwrap();
+        assert_eq!(decrypted_cek, payload);
     }
 }

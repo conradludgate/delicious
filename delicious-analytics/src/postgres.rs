@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use tokio::sync::{OnceCell, RwLock, RwLockReadGuard};
-use tokio_postgres::{types::Type, Config, Error, NoTls, Row, Statement, RowStream};
+use tokio_postgres::{types::Type, Config, Error, NoTls, Row, RowStream, Statement};
 
 /// Postgres client wrapper that monitors the connection and will reconnect on failure.
 #[derive(Debug, Clone)]
@@ -63,6 +63,7 @@ impl DbReconnector {
 pub struct Client {
     inner: tokio_postgres::Client,
     get_website: OnceCell<Statement>,
+    get_website_by_uuid: OnceCell<Statement>,
     get_all_websites: OnceCell<Statement>,
     get_user_websites: OnceCell<Statement>,
 }
@@ -80,12 +81,13 @@ impl Client {
         Client {
             inner: c,
             get_website: OnceCell::new(),
+            get_website_by_uuid: OnceCell::new(),
             get_all_websites: OnceCell::new(),
             get_user_websites: OnceCell::new(),
         }
     }
 
-    pub async fn get_website(&self, id: i32) -> Result<Row, Error> {
+    pub async fn get_website(&self, id: i32) -> Result<Option<Row>, Error> {
         static QUERY: &str = "SELECT
             website_id, website_uuid, user_id, name, domain, share_id, created_at
         FROM website
@@ -94,7 +96,19 @@ impl Client {
             .get_website
             .get_or_try_init(|| self.inner.prepare_typed(QUERY, &[Type::INT4]))
             .await?;
-        self.inner.query_one(stmt, &[&id]).await
+        self.inner.query_opt(stmt, &[&id]).await
+    }
+
+    pub async fn get_website_by_uuid(&self, id: uuid::Uuid) -> Result<Option<Row>, Error> {
+        static QUERY: &str = "SELECT
+            website_id, website_uuid, user_id, name, domain, share_id, created_at
+        FROM website
+        WHERE website_uuid = $1";
+        let stmt = self
+            .get_website_by_uuid
+            .get_or_try_init(|| self.inner.prepare_typed(QUERY, &[Type::UUID]))
+            .await?;
+        self.inner.query_opt(stmt, &[&id]).await
     }
 
     pub async fn get_all_websites(&self) -> Result<RowStream, Error> {

@@ -292,17 +292,14 @@ impl<'de, KMA: kma::KMA, H: DeserializeOwned> Deserialize<'de> for Encrypted<KMA
 
 impl<KMA: kma::KMA, H> fmt::Display for Encrypted<KMA, H> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let [aad, iv, payload, tag] = self.res.split();
+
         // safety, we only write ascii base64 into this field
-        let s = unsafe { std::str::from_utf8_unchecked(self.res.aad()) };
+        let s = unsafe { std::str::from_utf8_unchecked(aad) };
         f.write_str(s)?;
 
         let mut buf = [0; 1024];
-        let parts = [
-            &self.encrypted_cek,
-            self.res.nonce(),
-            self.res.encrypted_payload(),
-            self.res.tag(),
-        ];
+        let parts = [&self.encrypted_cek, iv, payload, tag];
         for part in parts {
             f.write_char('.')?;
             for chunk in part.chunks(1024 / 4 * 3) {
@@ -354,17 +351,14 @@ where
         let p_idx = decode(&mut data, iv, nonce)?;
         let tag_idx = decode(&mut data, payload, p_idx)?;
         let len = decode(&mut data, tag, tag_idx)?;
+
         data.truncate(len);
+        let res = EncryptionResult::from_packed(data, [nonce, p_idx, tag_idx, len]);
 
         Ok(Self {
             header,
             encrypted_cek: Vec::from_base64(cek)?,
-            res: EncryptionResult {
-                data,
-                nonce,
-                payload: p_idx,
-                tag: tag_idx,
-            },
+            res,
         })
     }
 }
@@ -378,13 +372,13 @@ where
     /// fields
     pub fn decrypt<T, CEA>(self, key: &KMA::Key) -> Result<Decrypted<T, H>, Error>
     where
-        CEA: jwa::cea::CEA<Cek = KMA::Cek>,
+        CEA: jwa::cea::CEA,
         T: FromCompactPart,
     {
         let Self {
             header,
-            encrypted_cek,
-            res,
+            mut encrypted_cek,
+            mut res,
         } = self;
 
         // Verify that the algorithms are expected
@@ -399,17 +393,17 @@ where
         // TODO: Steps 4-5 not implemented at the moment.
 
         // Steps 6-13 involve the computation of the cek
-        let cek = KMA::unwrap(&encrypted_cek, key, header.kma)?;
+        let cek = KMA::unwrap(&mut encrypted_cek, key, header.kma)?;
 
         // Build encryption result as per steps 14-15
-        let payload = CEA::decrypt(&cek, &res)?;
+        let payload = CEA::decrypt(cek, &mut res)?;
 
         // Decompression is not supported at the moment
         if header.registered.compression_algorithm.is_some() {
             return Err(Error::UnsupportedOperation);
         }
 
-        let payload = T::from_bytes(&payload)?;
+        let payload = T::from_bytes(payload)?;
 
         Ok(Decrypted::new_with_header(payload, header.private))
     }
@@ -467,7 +461,7 @@ where
     ) -> Result<Encrypted<KMA, H>, Error>
     where
         CEA: jwa::cea::CEA,
-        KMA: jwa::kma::KMA<Cek = CEA::Cek>,
+        KMA: jwa::kma::KMA,
     {
         // RFC 7516 Section 5.1 describes the steps involved in encryption.
         // From steps 1 to 8, we will first determine the CEK, and then encrypt the CEK.
@@ -498,12 +492,7 @@ where
         let encoded_protected_header = header.to_base64()?;
 
         // Step 15 involves the actual encryption.
-        let res = CEA::encrypt(
-            &cek,
-            &payload,
-            &iv,
-            encoded_protected_header.as_bytes().to_vec(),
-        )?;
+        let res = CEA::encrypt(&cek, &payload, &iv, encoded_protected_header.as_bytes())?;
 
         // Finally create the JWE
         Ok(Encrypted {
@@ -890,11 +879,14 @@ mod tests {
             .unwrap();
 
         // Modify the JWE
+        let [_, iv, payload, tag] = encrypted_jwe.res.split();
         encrypted_jwe.header.kma.nonce = vec![0; 96 / 8];
-        encrypted_jwe.res.data.splice(
-            ..encrypted_jwe.res.nonce,
-            encrypted_jwe.header.to_base64().unwrap().bytes(),
-        );
+        encrypted_jwe.res = EncryptionResult::from([
+            encrypted_jwe.header.to_base64().unwrap().as_bytes(),
+            iv,
+            payload,
+            tag,
+        ]);
 
         // Decrypt
         encrypted_jwe
@@ -919,11 +911,14 @@ mod tests {
             .unwrap();
 
         // Modify the JWE
+        let [_, iv, payload, tag] = encrypted_jwe.res.split();
         encrypted_jwe.header.kma.tag = vec![0; 96 / 8];
-        encrypted_jwe.res.data.splice(
-            ..encrypted_jwe.res.nonce,
-            encrypted_jwe.header.to_base64().unwrap().bytes(),
-        );
+        encrypted_jwe.res = EncryptionResult::from([
+            encrypted_jwe.header.to_base64().unwrap().as_bytes(),
+            iv,
+            payload,
+            tag,
+        ]);
 
         // Decrypt
         let _token: Decrypted<Vec<u8>, ()> =
@@ -947,7 +942,8 @@ mod tests {
             .unwrap();
 
         // Modify the JWE
-        encrypted_jwe.res.data.splice(encrypted_jwe.res.tag.., [0]);
+        let [header, iv, payload, _] = encrypted_jwe.res.split();
+        encrypted_jwe.res = EncryptionResult::from([header, iv, payload, &[0]]);
 
         // Decrypt
         let _token: Decrypted<Vec<u8>, ()> =
@@ -972,11 +968,14 @@ mod tests {
             .unwrap();
 
         // Modify the JWE
+        let [_, iv, payload, tag] = encrypted_jwe.res.split();
         encrypted_jwe.header.registered.media_type = Some("JOSE+JSON".to_string());
-        encrypted_jwe.res.data.splice(
-            ..encrypted_jwe.res.nonce,
-            encrypted_jwe.header.to_base64().unwrap().bytes(),
-        );
+        encrypted_jwe.res = EncryptionResult::from([
+            encrypted_jwe.header.to_base64().unwrap().as_bytes(),
+            iv,
+            payload,
+            tag,
+        ]);
 
         // Decrypt
         let _token: Decrypted<Vec<u8>, ()> =
@@ -1026,11 +1025,8 @@ mod tests {
             .unwrap();
 
         // Modify the JWE
-        encrypted_jwe
-            .res
-            .data
-            .splice(encrypted_jwe.res.payload..encrypted_jwe.res.tag, [0; 32]);
-        encrypted_jwe.res.tag = encrypted_jwe.res.payload + 32;
+        let [header, iv, _, tag] = encrypted_jwe.res.split();
+        encrypted_jwe.res = EncryptionResult::from([header, iv, &[0; 32], tag]);
 
         // Decrypt
         let _token: Decrypted<Vec<u8>, ()> =
@@ -1055,10 +1051,8 @@ mod tests {
             .unwrap();
 
         // Modify the JWE
-        encrypted_jwe.res.data.splice(
-            encrypted_jwe.res.nonce..encrypted_jwe.res.payload,
-            [0; 96 / 8],
-        );
+        let [header, _, payload, tag] = encrypted_jwe.res.split();
+        encrypted_jwe.res = EncryptionResult::from([header, &[0; 96 / 8], payload, tag]);
 
         // Decrypt
         let _token: Decrypted<Vec<u8>, ()> =

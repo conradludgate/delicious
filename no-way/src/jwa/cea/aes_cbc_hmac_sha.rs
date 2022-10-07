@@ -5,7 +5,7 @@ use cipher::block_padding::Pkcs7;
 use hmac::{Hmac, Mac};
 
 use super::{Algorithm, EncryptionResult, CEA};
-use crate::{errors::Error, jwk::OctetKey};
+use crate::errors::Error;
 
 /// [Content Encryption with `AES_CBC_HMAC_SHA2`](https://datatracker.ietf.org/doc/html/rfc7518#section-5.2)
 ///
@@ -55,70 +55,73 @@ macro_rules! aes_cbc {
     ($id:ident, $sha:ty, $aes:ty, $key_len:expr) => {
         impl CEA for $id {
             const ENC: Algorithm = Algorithm::$id;
-            type Cek = OctetKey;
             const IV: usize = 128 / 8;
 
-            fn generate_cek() -> Self::Cek {
+            fn generate_cek() -> Vec<u8> {
                 let mut rng = rand::thread_rng();
                 let mut key = vec![0; $key_len * 2];
                 rand::Rng::fill(&mut rng, key.as_mut_slice());
-                OctetKey::new(key)
+                key
             }
 
             fn encrypt(
-                cek: &Self::Cek,
+                cek: &[u8],
                 payload: &[u8],
                 iv: &[u8],
-                aad: Vec<u8>,
+                aad: &[u8],
             ) -> Result<EncryptionResult, Error> {
-                if cek.value.len() != $key_len * 2 {
+                if cek.len() != $key_len * 2 {
                     return Err(Error::UnspecifiedCryptographicError);
                 }
 
-                let (mac_key, enc_key) = cek.value.split_at($key_len);
+                let (mac_key, enc_key) = cek.split_at($key_len);
 
                 let bs = <$aes as cipher::BlockSizeUser>::block_size();
                 let padded_len = bs * (payload.len() / bs + 1);
 
-                // padded_len >= payload.len()
-                let mut output = unsafe {
-                    EncryptionResult::new_without_tag(aad, iv, payload, padded_len, $key_len)
-                };
+                let mut output = EncryptionResult::new([aad.len(), iv.len(), padded_len, $key_len]);
+                output[0].copy_from_slice(aad);
+                output[1].copy_from_slice(iv);
+                output[2][..payload.len()].copy_from_slice(payload);
 
                 // encrypt the payload using aes-cbc
                 cbc::Encryptor::<$aes>::new_from_slices(enc_key, &iv)?
-                    .encrypt_padded_mut::<Pkcs7>(&mut output.data[output.payload..], payload.len())
+                    .encrypt_padded_mut::<Pkcs7>(&mut output[2], payload.len())
                     .expect("enough space for encrypting is allocated");
 
                 // compute the hmac
                 let tag = Hmac::<$sha>::new_from_slice(mac_key)?
-                    .chain_update(&output.data)
-                    .chain_update(&(output.nonce as u64 * 8).to_be_bytes())
+                    .chain_update(&output[0..3])
+                    .chain_update(&(output[0].len() as u64 * 8).to_be_bytes())
                     .finalize()
                     .into_bytes();
 
-                // tag is guaranteed to be $key_len
-                unsafe { output.push_tag(&tag[..$key_len]) }
+                output[3].copy_from_slice(&tag[..$key_len]);
 
                 Ok(output)
             }
 
-            fn decrypt(cek: &Self::Cek, res: &EncryptionResult) -> Result<Vec<u8>, Error> {
-                if cek.value.len() != $key_len * 2 || res.tag().len() != $key_len {
+            fn decrypt<'res>(
+                cek: &[u8],
+                res: &'res mut EncryptionResult,
+            ) -> Result<&'res [u8], Error> {
+                let [aad, iv, _, tag] = res.split();
+
+                if cek.len() != $key_len * 2 || tag.len() != $key_len {
                     return Err(Error::UnspecifiedCryptographicError);
                 }
-                let (mac_key, enc_key) = cek.value.split_at($key_len);
+                let (mac_key, enc_key) = cek.split_at($key_len);
 
                 // validate the hmac
                 Hmac::<$sha>::new_from_slice(mac_key)?
-                    .chain_update(&res.data[..res.tag])
-                    .chain_update(&(res.aad().len() as u64 * 8).to_be_bytes())
-                    .verify_truncated_left(&res.tag())?;
+                    .chain_update(&res[0..3])
+                    .chain_update(&(aad.len() as u64 * 8).to_be_bytes())
+                    .verify_truncated_left(tag)?;
 
                 // decrypt the payload using aes-cbc
-                let decrypted = cbc::Decryptor::<$aes>::new_from_slices(enc_key, res.nonce())?
-                    .decrypt_padded_vec_mut::<Pkcs7>(res.encrypted_payload())?;
-                Ok(decrypted)
+                let pt = cbc::Decryptor::<$aes>::new_from_slices(enc_key, iv)?
+                    .decrypt_padded_mut::<Pkcs7>(&mut res[2])?;
+                Ok(pt)
             }
         }
     };
@@ -136,12 +139,9 @@ mod tests {
 
     #[test]
     fn aes128sha256() {
-        let key = OctetKey::new(
-            hex!(
-                "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
-                "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"
-            )
-            .to_vec(),
+        let key = &hex!(
+            "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
+            "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"
         );
         let enc = &hex!(
             "c8 0e df a3 2d df 39 d5 ef 00 c0 b4 68 83 42 79"
@@ -156,18 +156,15 @@ mod tests {
         );
         let tag = &hex!("65 2c 3f a3 6b 0a 7c 5b 32 19 fa b3 a3 0b c1 c4");
 
-        cea_round_trip::<A128CBC_HS256>(&key, enc, tag);
+        cea_round_trip::<A128CBC_HS256>(key, enc, tag);
     }
 
     #[test]
     fn aes192sha384() {
-        let key = OctetKey::new(
-            hex!(
-                "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
-                "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"
-                "20 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f"
-            )
-            .to_vec(),
+        let key = &hex!(
+            "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
+            "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"
+            "20 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f"
         );
         let enc = &hex!(
             "ea 65 da 6b 59 e6 1e db 41 9b e6 2d 19 71 2a e5"
@@ -185,19 +182,16 @@ mod tests {
             "75 16 80 39 cc c7 33 d7"
         );
 
-        cea_round_trip::<A192CBC_HS384>(&key, enc, tag);
+        cea_round_trip::<A192CBC_HS384>(key, enc, tag);
     }
 
     #[test]
     fn aes256sha512() {
-        let key = OctetKey::new(
-            hex!(
-                "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
-                "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"
-                "20 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f"
-                "30 31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f"
-            )
-            .to_vec(),
+        let key = &hex!(
+            "00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f"
+            "10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f"
+            "20 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f"
+            "30 31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f"
         );
         let enc = &hex!(
             "4a ff aa ad b7 8c 31 c5 da 4b 1b 59 0d 10 ff bd"
@@ -215,13 +209,10 @@ mod tests {
             "2e 62 69 a8 c5 6a 81 6d bc 1b 26 77 61 95 5b c5"
         );
 
-        cea_round_trip::<A256CBC_HS512>(&key, enc, tag);
+        cea_round_trip::<A256CBC_HS512>(key, enc, tag);
     }
 
-    fn cea_round_trip<C: CEA>(key: &C::Cek, enc: &[u8], tag: &[u8])
-    where
-        C::Cek: Clone + PartialEq + std::fmt::Debug,
-    {
+    fn cea_round_trip<C: CEA>(key: &[u8], enc: &[u8], tag: &[u8]) {
         let payload = hex!(
             "41 20 63 69 70 68 65 72 20 73 79 73 74 65 6d 20"
             "6d 75 73 74 20 6e 6f 74 20 62 65 20 72 65 71 75"
@@ -239,14 +230,15 @@ mod tests {
             "4b 65 72 63 6b 68 6f 66 66 73"
         );
 
-        let res = C::encrypt(key, &payload, &iv, aad.to_vec()).unwrap();
+        let mut res = C::encrypt(key, &payload, &iv, &aad).unwrap();
+        let [aad1, iv1, payload1, tag1] = res.split();
 
-        assert_eq!(res.aad(), aad);
-        assert_eq!(res.nonce(), iv);
-        assert_eq!(res.encrypted_payload(), enc);
-        assert_eq!(res.tag(), tag);
+        assert_eq!(aad1, aad);
+        assert_eq!(iv1, iv);
+        assert_eq!(payload1, enc);
+        assert_eq!(tag1, tag);
 
-        let output = C::decrypt(key, &res).unwrap();
+        let output = C::decrypt(key, &mut res).unwrap();
         assert_eq!(output, payload);
     }
 }

@@ -48,36 +48,29 @@ macro_rules! aes_gcm {
         impl KMA for $id {
             const ALG: super::Algorithm = super::Algorithm::AesGcmKw(AesGcmKwAlgorithm::$name);
             type Key = OctetKey;
-            type Cek = OctetKey;
             type Header = AesGcmKwHeader;
             type WrapSettings = Vec<u8>;
 
             fn wrap(
-                cek: &Self::Cek,
+                cek: &[u8],
                 key: &Self::Key,
                 settings: Self::WrapSettings,
             ) -> Result<(Vec<u8>, Self::Header), Error> {
-                let res = Self::encrypt_inner(&key.value, &cek.value, &settings, Vec::new())?;
+                let res = Self::encrypt_inner(&key.value, &cek, &settings, &[])?;
+                let [_, iv, payload, tag] = res.split();
                 let header = AesGcmKwHeader {
-                    nonce: res.nonce().to_vec(),
-                    tag: res.tag().to_vec(),
+                    nonce: iv.to_vec(),
+                    tag: tag.to_vec(),
                 };
-                Ok((res.encrypted_payload().to_vec(), header))
+                Ok((payload.to_vec(), header))
             }
 
-            fn unwrap(
-                encrypted_cek: &[u8],
-                key: &Self::Key,
+            fn unwrap<'c>(
+                encrypted_cek: &'c mut [u8],
+                key: &'c Self::Key,
                 header: Self::Header,
-            ) -> Result<Self::Cek, Error> {
-                let res = Self::decrypt_inner(
-                    &key.value,
-                    encrypted_cek,
-                    &header.nonce,
-                    &header.tag,
-                    &[],
-                )?;
-                Ok(OctetKey::new(res))
+            ) -> Result<&'c [u8], Error> {
+                Self::decrypt_inner(&key.value, encrypted_cek, &header.nonce, &header.tag, &[])
             }
         }
     };
@@ -122,15 +115,15 @@ mod tests {
 
     fn kma_round_trip<K>(key: &K::Key)
     where
-        K: KMA<Cek = OctetKey, WrapSettings = Vec<u8>>,
+        K: KMA<WrapSettings = Vec<u8>>,
     {
-        let cek = OctetKey::new(random_vec(128 / 8));
+        let cek = random_vec(128 / 8);
         let nonce = random_aes_gcm_nonce();
 
-        let (encrypted_cek, settings) = K::wrap(&cek, key, nonce).unwrap();
-        let decrypted_cek = K::unwrap(&encrypted_cek, key, settings).unwrap();
+        let (mut encrypted_cek, settings) = K::wrap(&cek, key, nonce).unwrap();
+        assert_ne!(cek, encrypted_cek);
 
-        assert_ne!(cek.as_bytes(), encrypted_cek);
+        let decrypted_cek = K::unwrap(&mut encrypted_cek, key, settings).unwrap();
         assert_eq!(cek, decrypted_cek);
     }
 }

@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-no-way = { version = "0.2.0", path = "../no-way" }
+no-way = { version = "0.3.0", path = "../no-way" }
 
 axum = { version = "0.5.16", features = ["headers"] }
 futures = "0.3.24"
@@ -24,3 +24,4 @@ async-trait = "0.1.57"
 serde_json = "1"
 sha2 = "0.10.6"
 hex = "0.4.3"
+http-body = "0.4.5"

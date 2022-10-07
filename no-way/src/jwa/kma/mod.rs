@@ -95,34 +95,32 @@ pub trait KMA {
 
     /// Key used to derive the Cek
     type Key;
-    /// Content Encryption Key
-    type Cek;
     /// Values to store in the header, used to unwrap the Cek
     type Header: Serialize + DeserializeOwned;
     /// Settings used to wrap the key
     type WrapSettings;
 
     /// Generate a key for the CEA
-    fn generate_key<CEA>(_key: &Self::Key) -> Self::Cek
+    fn generate_key<CEA>(_key: &Self::Key) -> Vec<u8>
     where
-        CEA: super::cea::CEA<Cek = Self::Cek>,
+        CEA: super::cea::CEA,
     {
         CEA::generate_cek()
     }
 
     /// Wraps the content encryption key
     fn wrap(
-        cek: &Self::Cek,
+        cek: &[u8],
         key: &Self::Key,
         settings: Self::WrapSettings,
     ) -> Result<(Vec<u8>, Self::Header), Error>;
 
-    /// unwraps the content encryption key
-    fn unwrap(
-        encrypted_cek: &[u8],
-        key: &Self::Key,
+    /// unwraps the content encryption key in place
+    fn unwrap<'c>(
+        encrypted_cek: &'c mut [u8],
+        key: &'c Self::Key,
         settings: Self::Header,
-    ) -> Result<Self::Cek, Error>;
+    ) -> Result<&'c [u8], Error>;
 }
 
 /// [Direct Encryption with a Shared Symmetric Key](https://datatracker.ietf.org/doc/html/rfc7518#section-4.5)
@@ -132,32 +130,31 @@ pub struct DirectEncryption;
 impl KMA for DirectEncryption {
     const ALG: Algorithm = Algorithm::DirectSymmetricKey;
     type Key = OctetKey;
-    type Cek = OctetKey;
     type Header = ();
     type WrapSettings = ();
 
-    fn generate_key<CEA>(key: &Self::Key) -> Self::Cek
+    fn generate_key<CEA>(key: &Self::Key) -> Vec<u8>
     where
-        CEA: super::cea::CEA<Cek = Self::Cek>,
+        CEA: super::cea::CEA,
     {
-        key.clone()
+        key.value.clone()
     }
 
     fn wrap(
-        _cek: &Self::Cek,
+        _cek: &[u8],
         _key: &Self::Key,
         _settings: Self::WrapSettings,
     ) -> Result<(Vec<u8>, Self::Header), Error> {
         Ok((vec![], ()))
     }
 
-    fn unwrap(
-        encrypted_cek: &[u8],
-        key: &Self::Key,
+    fn unwrap<'c>(
+        encrypted_cek: &'c mut [u8],
+        key: &'c Self::Key,
         _settings: Self::Header,
-    ) -> Result<Self::Cek, Error> {
+    ) -> Result<&'c [u8], Error> {
         if encrypted_cek.is_empty() {
-            Ok(key.clone())
+            Ok(&key.value)
         } else {
             Err(Error::DecodeError(crate::errors::DecodeError::InvalidToken))
         }
@@ -344,7 +341,7 @@ mod tests {
 
         let cek = DirectEncryption::generate_key::<cea::A256GCM>(&key);
 
-        assert_eq!(cek, key);
+        assert_eq!(cek, key.as_bytes());
     }
 
     /// `KeyManagementAlgorithm::A128GCMKW` returns a random key with the right length when CEK is requested
@@ -353,12 +350,12 @@ mod tests {
         let key = cek_oct_key(128 / 8);
 
         let cek = A128GCMKW::generate_key::<cea::A128GCM>(&key);
-        assert_eq!(cek.as_bytes().len(), 128 / 8);
-        assert_ne!(cek, key);
+        assert_eq!(cek.len(), 128 / 8);
+        assert_ne!(cek, key.as_bytes());
 
         let cek = A128GCMKW::generate_key::<cea::A256GCM>(&key);
-        assert_eq!(cek.as_bytes().len(), 256 / 8);
-        assert_ne!(cek, key);
+        assert_eq!(cek.len(), 256 / 8);
+        assert_ne!(cek, key.as_bytes());
     }
 
     /// `KeyManagementAlgorithm::A256GCMKW` returns a random key with the right length when CEK is requested
@@ -367,11 +364,11 @@ mod tests {
         let key = cek_oct_key(256 / 8);
 
         let cek = A256GCMKW::generate_key::<cea::A128GCM>(&key);
-        assert_eq!(cek.as_bytes().len(), 128 / 8);
-        assert_ne!(cek, key);
+        assert_eq!(cek.len(), 128 / 8);
+        assert_ne!(cek, key.as_bytes());
 
         let cek = A256GCMKW::generate_key::<cea::A256GCM>(&key);
-        assert_eq!(cek.as_bytes().len(), 256 / 8);
-        assert_ne!(cek, key);
+        assert_eq!(cek.len(), 256 / 8);
+        assert_ne!(cek, key.as_bytes());
     }
 }

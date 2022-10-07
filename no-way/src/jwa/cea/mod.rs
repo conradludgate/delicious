@@ -1,116 +1,201 @@
 //! [Cryptographic Algorithms for Content Encryption](https://datatracker.ietf.org/doc/html/rfc7518#section-5)
+use std::{
+    fmt,
+    ops::{Index, IndexMut, Range},
+};
+
 use crate::errors::Error;
 
 pub(crate) mod aes_cbc_hmac_sha;
 pub(crate) mod aes_gcm;
 pub use self::aes_gcm::{AesGcm, A128GCM, A192GCM, A256GCM};
 pub use aes_cbc_hmac_sha::{AesCbcHmacSha2, A128CBC_HS256, A192CBC_HS384, A256CBC_HS512};
+use arrayvec::ArrayVec;
 use serde::{Deserialize, Serialize};
 
 /// [Cryptographic Algorithms for Content Encryption](https://datatracker.ietf.org/doc/html/rfc7518#section-5)
 pub trait CEA {
     /// The name specified in the `enc` header.
     const ENC: Algorithm;
-    /// Content Encryption Key
-    type Cek;
     /// Initialization Vector length in bytes
     const IV: usize;
 
     /// Generate a random content encryption key
-    fn generate_cek() -> Self::Cek;
+    fn generate_cek() -> Vec<u8>;
 
     /// Encrypts the payload
     fn encrypt(
-        cek: &Self::Cek,
+        cek: &[u8],
         payload: &[u8],
         iv: &[u8],
-        aad: Vec<u8>,
+        aad: &[u8],
     ) -> Result<EncryptionResult, Error>;
 
-    /// Decrypts the payload
-    fn decrypt(cek: &Self::Cek, res: &EncryptionResult) -> Result<Vec<u8>, Error>;
+    /// Decrypts the payload in place, returning a slice to the payload
+    fn decrypt<'r>(cek: &[u8], res: &'r mut EncryptionResult) -> Result<&'r [u8], Error>;
+}
+
+/// A packed representation of N slices. Always pre-allocated
+#[derive(Clone, PartialEq, Eq)]
+pub struct PackedBuffer<const N: usize> {
+    buf: Vec<u8>,
+    sections: [usize; N],
+}
+
+impl<const N: usize> fmt::Debug for PackedBuffer<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut list = f.debug_list();
+        self.sections.iter().fold(0, |start, &end| {
+            list.entry(&&self.buf[start..end]);
+            end
+        });
+        list.finish()
+    }
+}
+
+/// Construct a `PackedBuffer` from all the slices
+impl<const N: usize> From<[&[u8]; N]> for PackedBuffer<N> {
+    fn from(slices: [&[u8]; N]) -> Self {
+        let len = slices.iter().map(|s| s.len()).sum();
+        let mut buf = Vec::with_capacity(len);
+        let mut sections = [0; N];
+
+        let mut n = 0;
+        for i in 0..N {
+            let m = n + slices[i].len();
+            buf.extend_from_slice(slices[i]);
+            n = m;
+            sections[i] = m;
+        }
+
+        Self { buf, sections }
+    }
+}
+
+impl<const N: usize> PackedBuffer<N> {
+    /// Constructs a new `PackedBuffer` using the buffer and sections provided.
+    ///
+    /// # Panics
+    /// This will panic if the `sections` value is not monotonically increasing,
+    /// or it exceeds the length of the buffer
+    pub fn from_packed(buf: Vec<u8>, sections: [usize; N]) -> Self {
+        let mut n = 0;
+        for &i in &sections {
+            assert!(n <= i, "sections must be a monotonically increasing array");
+            n = i;
+        }
+        assert_eq!(
+            sections[N - 1],
+            buf.len(),
+            "provided buffer does not have the correct space"
+        );
+
+        Self { buf, sections }
+    }
+
+    /// Constructs a new zeroed `PackedBuffer` where each section can fit the length provided
+    pub fn new(mut lengths: [usize; N]) -> Self {
+        let mut n = 0;
+        for len in lengths.iter_mut() {
+            n += *len;
+            *len = n;
+        }
+        let buffer = vec![0; n];
+        Self {
+            buf: buffer,
+            sections: lengths,
+        }
+    }
+
+    /// Splits the packed buffer into N slices
+    pub fn split(&self) -> [&[u8]; N] {
+        let Self { buf, sections } = self;
+        let mut rest: &[u8] = buf;
+        let mut output = [rest; N];
+        for i in (1..N).rev() {
+            let (r, s) = rest.split_at(sections[i - 1]);
+            rest = r;
+            output[i] = s;
+        }
+        output[0] = rest;
+        output
+    }
+
+    /// Splits the packed buffer into N mutable slices
+    pub fn split_mut(&mut self) -> [&mut [u8]; N] {
+        let Self { buf, sections } = self;
+        let mut output: ArrayVec<&mut [u8], N> = ArrayVec::new();
+        let mut rest: &mut [u8] = &mut *buf;
+        for i in (1..N).rev() {
+            let (r, s) = rest.split_at_mut(sections[i - 1]);
+            rest = r;
+            output.insert(0, s);
+        }
+        output.insert(0, rest);
+        // safety: we guarantee to insert N elements
+        unsafe { output.into_inner_unchecked() }
+    }
+
+    fn index(&self, index: usize) -> Range<usize> {
+        let end = self.sections[index];
+        let start = if let Some(i) = index.checked_sub(1) {
+            self.sections[i]
+        } else {
+            0
+        };
+        start..end
+    }
+
+    fn range(&self, index: Range<usize>) -> Range<usize> {
+        let start = if let Some(i) = index.start.checked_sub(1) {
+            self.sections[i]
+        } else {
+            0
+        };
+        let end = if let Some(i) = index.end.checked_sub(1) {
+            self.sections[i]
+        } else {
+            0
+        };
+        start..end
+    }
+}
+
+impl<const N: usize> Index<usize> for PackedBuffer<N> {
+    type Output = [u8];
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.buf[self.index(index)]
+    }
+}
+
+impl<const N: usize> IndexMut<usize> for PackedBuffer<N> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        let range = self.index(index);
+        &mut self.buf[range]
+    }
+}
+
+impl<const N: usize> Index<Range<usize>> for PackedBuffer<N> {
+    type Output = [u8];
+
+    fn index(&self, index: Range<usize>) -> &Self::Output {
+        &self.buf[self.range(index)]
+    }
+}
+
+impl<const N: usize> IndexMut<Range<usize>> for PackedBuffer<N> {
+    fn index_mut(&mut self, index: Range<usize>) -> &mut Self::Output {
+        let range = self.range(index);
+        &mut self.buf[range]
+    }
 }
 
 /// The result returned from an encryption operation
 ///
-/// This is a more internal focused type.
-/// It's compressed as [AAD,NONCE,PAYLOAD,TAG] all in 1 vec to avoid having
+/// It's packed as [AAD,NONCE,PAYLOAD,TAG] to avoid having
 /// multiple allocations.
-#[derive(Clone, Debug, Eq, PartialEq, Default)]
-pub struct EncryptionResult {
-    pub(crate) data: Vec<u8>,
-    pub(crate) nonce: usize,
-    pub(crate) payload: usize,
-    pub(crate) tag: usize,
-}
-
-impl EncryptionResult {
-    /// Creates the `EncryptionResult` with the 3 known values, and spare space for the tag.
-    ///
-    /// Safety: `payload_size` must be >= `payload.len()`
-    pub(crate) unsafe fn new_without_tag(
-        mut aad: Vec<u8>,
-        iv: &[u8],
-        payload: &[u8],
-        payload_size: usize,
-        tag_size: usize,
-    ) -> Self {
-        debug_assert!(payload_size >= payload.len());
-
-        let nonce_index = aad.len();
-        let payload_index = nonce_index + iv.len();
-        let tag = payload_index + payload_size;
-        aad.reserve(payload_size + iv.len() + tag_size);
-
-        // safety, writes into pre-alloc memory
-        {
-            let bytes = aad.spare_capacity_mut();
-            let mut p = bytes.as_mut_ptr().cast::<u8>();
-
-            p.copy_from_nonoverlapping(iv.as_ptr(), iv.len());
-            p = p.add(iv.len());
-            p.copy_from_nonoverlapping(payload.as_ptr(), payload.len());
-            p = p.add(payload.len());
-            p.write_bytes(0, payload_size - payload.len());
-
-            aad.set_len(tag);
-        }
-
-        Self {
-            nonce: nonce_index,
-            payload: payload_index,
-            tag,
-            data: aad,
-        }
-    }
-    /// Adds the tag to the end of the buffer (without allocating)
-    ///
-    /// Safety: must have `tag_size` spare bytes available
-    /// (guaranteed if specifed in the [`new_without_tag`] call)
-    pub(crate) unsafe fn push_tag(&mut self, tag: &[u8]) {
-        debug_assert_eq!(self.tag, self.data.len(), "You pushed the tag already");
-        let bytes = self.data.spare_capacity_mut();
-        debug_assert!(bytes.len() >= tag.len());
-
-        let p = bytes.as_mut_ptr().cast::<u8>();
-        p.copy_from_nonoverlapping(tag.as_ptr(), tag.len());
-
-        self.data.set_len(self.tag + tag.len());
-    }
-
-    pub fn aad(&self) -> &[u8] {
-        unsafe { self.data.get_unchecked(..self.nonce) }
-    }
-    pub fn nonce(&self) -> &[u8] {
-        unsafe { self.data.get_unchecked(self.nonce..self.payload) }
-    }
-    pub fn encrypted_payload(&self) -> &[u8] {
-        unsafe { self.data.get_unchecked(self.payload..self.tag) }
-    }
-    pub fn tag(&self) -> &[u8] {
-        unsafe { self.data.get_unchecked(self.tag..) }
-    }
-}
+pub type EncryptionResult = PackedBuffer<4>;
 
 /// Algorithms meant for content encryption.
 /// See [RFC7518#5](https://tools.ietf.org/html/rfc7518#section-5)

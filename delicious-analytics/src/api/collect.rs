@@ -4,6 +4,7 @@ use axum::{
     http::StatusCode,
     Json, TypedHeader,
 };
+use futures::TryFutureExt;
 use headers_core::{Header, HeaderName, HeaderValue};
 use no_way::jwa::sign;
 use serde::{Deserialize, Serialize};
@@ -28,7 +29,7 @@ pub struct Session {
 }
 
 #[async_trait]
-impl<B: Send> FromRequest<B> for Session {
+impl<B: Send + axum::body::HttpBody> FromRequest<B> for Session {
     type Rejection = StatusCode;
 
     async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
@@ -45,6 +46,15 @@ impl<B: Send> FromRequest<B> for Session {
                 return Ok(session.payload);
             }
         }
+
+        let payload: Json<SessionBody> = req.extract().await?;
+
+        let row = db
+            .get_website_by_uuid(payload.website)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .ok_or(|_| StatusCode::BAD_REQUEST)?;
+
         todo!()
     }
 }
