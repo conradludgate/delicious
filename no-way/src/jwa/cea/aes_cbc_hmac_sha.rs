@@ -55,7 +55,7 @@ macro_rules! aes_cbc {
     ($id:ident, $sha:ty, $aes:ty, $key_len:expr) => {
         impl CEA for $id {
             const ENC: Algorithm = Algorithm::$id;
-            const IV: usize = 128 / 8;
+            type IV = [u8; 128 / 8];
 
             fn generate_cek() -> Vec<u8> {
                 let mut rng = rand::thread_rng();
@@ -64,10 +64,17 @@ macro_rules! aes_cbc {
                 key
             }
 
+            fn generate_iv() -> [u8; 128 / 8] {
+                let mut rng = rand::thread_rng();
+                let mut key = [0; 128 / 8];
+                rand::Rng::fill(&mut rng, key.as_mut_slice());
+                key
+            }
+
             fn encrypt(
                 cek: &[u8],
                 payload: &[u8],
-                iv: &[u8],
+                iv: [u8; 128 / 8],
                 aad: &[u8],
             ) -> Result<EncryptionResult, Error> {
                 if cek.len() != $key_len * 2 {
@@ -81,7 +88,7 @@ macro_rules! aes_cbc {
 
                 let mut output = EncryptionResult::new([aad.len(), iv.len(), padded_len, $key_len]);
                 output[0].copy_from_slice(aad);
-                output[1].copy_from_slice(iv);
+                output[1].copy_from_slice(&iv);
                 output[2][..payload.len()].copy_from_slice(payload);
 
                 // encrypt the payload using aes-cbc
@@ -212,7 +219,7 @@ mod tests {
         cea_round_trip::<A256CBC_HS512>(key, enc, tag);
     }
 
-    fn cea_round_trip<C: CEA>(key: &[u8], enc: &[u8], tag: &[u8]) {
+    fn cea_round_trip<C: CEA<IV = [u8; 16]>>(key: &[u8], enc: &[u8], tag: &[u8]) {
         let payload = hex!(
             "41 20 63 69 70 68 65 72 20 73 79 73 74 65 6d 20"
             "6d 75 73 74 20 6e 6f 74 20 62 65 20 72 65 71 75"
@@ -230,7 +237,7 @@ mod tests {
             "4b 65 72 63 6b 68 6f 66 66 73"
         );
 
-        let mut res = C::encrypt(key, &payload, &iv, &aad).unwrap();
+        let mut res = C::encrypt(key, &payload, iv, &aad).unwrap();
         let [aad1, iv1, payload1, tag1] = res.split();
 
         assert_eq!(aad1, aad);

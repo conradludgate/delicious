@@ -233,12 +233,12 @@ mod tests {
     #[test]
     // https://www.rfc-editor.org/rfc/rfc3394#section-4.1
     fn aes128_keywrapping_128() {
-        let kek = hex_literal::hex!("000102030405060708090A0B0C0D0E0F");
+        let cek = hex_literal::hex!("000102030405060708090A0B0C0D0E0F");
         let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF");
 
         let mut out = [0; 8 + 16];
         out[8..].copy_from_slice(&data);
-        let cipher = aes::Aes128Enc::new_from_slice(&kek).unwrap();
+        let cipher = aes::Aes128Enc::new_from_slice(&cek).unwrap();
         aes_key_wrap(cipher, &mut out);
 
         assert_eq!(
@@ -246,7 +246,7 @@ mod tests {
             hex_literal::hex!("1FA68B0A8112B447 AEF34BD8FB5A7B82 9D3E862371D2CFE5")
         );
 
-        let cipher = aes::Aes128Dec::new_from_slice(&kek).unwrap();
+        let cipher = aes::Aes128Dec::new_from_slice(&cek).unwrap();
         aes_key_unwrap(cipher, &mut out).unwrap();
 
         assert_eq!(out[8..], data);
@@ -255,12 +255,12 @@ mod tests {
     #[test]
     // https://www.rfc-editor.org/rfc/rfc3394#section-4.2
     fn aes192_keywrapping_128() {
-        let kek = hex_literal::hex!("000102030405060708090A0B0C0D0E0F1011121314151617");
+        let cek = hex_literal::hex!("000102030405060708090A0B0C0D0E0F1011121314151617");
         let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF");
 
         let mut out = [0; 8 + 16];
         out[8..].copy_from_slice(&data);
-        let cipher = aes::Aes192Enc::new_from_slice(&kek).unwrap();
+        let cipher = aes::Aes192Enc::new_from_slice(&cek).unwrap();
         aes_key_wrap(cipher, &mut out);
 
         assert_eq!(
@@ -268,7 +268,7 @@ mod tests {
             hex_literal::hex!("96778B25AE6CA435 F92B5B97C050AED2 468AB8A17AD84E5D")
         );
 
-        let cipher = aes::Aes192Dec::new_from_slice(&kek).unwrap();
+        let cipher = aes::Aes192Dec::new_from_slice(&cek).unwrap();
         aes_key_unwrap(cipher, &mut out).unwrap();
 
         assert_eq!(out[8..], data);
@@ -277,13 +277,13 @@ mod tests {
     #[test]
     // https://www.rfc-editor.org/rfc/rfc3394#section-4.3
     fn aes256_keywrapping_128() {
-        let kek =
+        let cek =
             hex_literal::hex!("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
         let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF");
 
         let mut out = [0; 8 + 16];
         out[8..].copy_from_slice(&data);
-        let cipher = aes::Aes256Enc::new_from_slice(&kek).unwrap();
+        let cipher = aes::Aes256Enc::new_from_slice(&cek).unwrap();
         aes_key_wrap(cipher, &mut out);
 
         assert_eq!(
@@ -291,7 +291,7 @@ mod tests {
             hex_literal::hex!("64E8C3F9CE0F5BA2 63E9777905818A2A 93C8191E7D6E8AE7")
         );
 
-        let cipher = aes::Aes256Dec::new_from_slice(&kek).unwrap();
+        let cipher = aes::Aes256Dec::new_from_slice(&cek).unwrap();
         aes_key_unwrap(cipher, &mut out).unwrap();
 
         assert_eq!(out[8..], data);
@@ -300,12 +300,12 @@ mod tests {
     #[test]
     // https://www.rfc-editor.org/rfc/rfc3394#section-4.4
     fn aes192_keywrapping_192() {
-        let kek = hex_literal::hex!("000102030405060708090A0B0C0D0E0F1011121314151617");
+        let cek = hex_literal::hex!("000102030405060708090A0B0C0D0E0F1011121314151617");
         let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF0001020304050607");
 
         let mut out = [0; 8 + 24];
         out[8..].copy_from_slice(&data);
-        let cipher = aes::Aes192Enc::new_from_slice(&kek).unwrap();
+        let cipher = aes::Aes192Enc::new_from_slice(&cek).unwrap();
         aes_key_wrap(cipher, &mut out);
 
         assert_eq!(
@@ -315,7 +315,7 @@ mod tests {
             )
         );
 
-        let cipher = aes::Aes192Dec::new_from_slice(&kek).unwrap();
+        let cipher = aes::Aes192Dec::new_from_slice(&cek).unwrap();
         aes_key_unwrap(cipher, &mut out).unwrap();
 
         assert_eq!(out[8..], data);
@@ -324,13 +324,13 @@ mod tests {
     #[test]
     // https://www.rfc-editor.org/rfc/rfc3394#section-4.5
     fn aes256_keywrapping_192() {
-        let kek =
+        let cek =
             hex_literal::hex!("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
         let data = hex_literal::hex!("00112233445566778899AABBCCDDEEFF0001020304050607");
 
         let mut out = [0; 8 + 24];
         out[8..].copy_from_slice(&data);
-        let cipher = aes::Aes256Enc::new_from_slice(&kek).unwrap();
+        let cipher = aes::Aes256Enc::new_from_slice(&cek).unwrap();
         aes_key_wrap(cipher, &mut out);
 
         assert_eq!(
@@ -340,7 +340,7 @@ mod tests {
             )
         );
 
-        let cipher = aes::Aes256Dec::new_from_slice(&kek).unwrap();
+        let cipher = aes::Aes256Dec::new_from_slice(&cek).unwrap();
         aes_key_unwrap(cipher, &mut out).unwrap();
 
         assert_eq!(out[8..], data);
@@ -349,14 +349,14 @@ mod tests {
     #[test]
     // https://www.rfc-editor.org/rfc/rfc3394#section-4.6
     fn aes256_keywrapping_256() {
-        let kek =
+        let cek =
             hex_literal::hex!("000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F");
         let data =
             hex_literal::hex!("00112233445566778899AABBCCDDEEFF000102030405060708090A0B0C0D0E0F");
 
         let mut out = [0; 8 + 32];
         out[8..].copy_from_slice(&data);
-        let cipher = aes::Aes256Enc::new_from_slice(&kek).unwrap();
+        let cipher = aes::Aes256Enc::new_from_slice(&cek).unwrap();
         aes_key_wrap(cipher, &mut out);
 
         assert_eq!(
@@ -367,7 +367,7 @@ mod tests {
             )
         );
 
-        let cipher = aes::Aes256Dec::new_from_slice(&kek).unwrap();
+        let cipher = aes::Aes256Dec::new_from_slice(&cek).unwrap();
         aes_key_unwrap(cipher, &mut out).unwrap();
 
         assert_eq!(out[8..], data);

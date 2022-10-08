@@ -17,17 +17,19 @@ use serde::{Deserialize, Serialize};
 pub trait CEA {
     /// The name specified in the `enc` header.
     const ENC: Algorithm;
-    /// Initialization Vector length in bytes
-    const IV: usize;
+    /// Initialization Vector (usually an array type)
+    type IV;
 
     /// Generate a random content encryption key
     fn generate_cek() -> Vec<u8>;
+    /// Generate a random initialisation vector key
+    fn generate_iv() -> Self::IV;
 
     /// Encrypts the payload
     fn encrypt(
         cek: &[u8],
         payload: &[u8],
-        iv: &[u8],
+        iv: Self::IV,
         aad: &[u8],
     ) -> Result<EncryptionResult, Error>;
 
@@ -35,7 +37,27 @@ pub trait CEA {
     fn decrypt<'r>(cek: &[u8], res: &'r mut EncryptionResult) -> Result<&'r [u8], Error>;
 }
 
-/// A packed representation of N slices. Always pre-allocated
+/// A packed representation of N slices. Always pre-allocated, does not support resizing
+///
+/// # Example
+/// ```
+/// use no_way::jwa::cea::PackedBuffer;
+///
+/// let buf = PackedBuffer::from([
+///     b"additional authenticated data".as_slice(),
+///     b"initialisation vector".as_slice(),
+///     b"encrypted payload".as_slice(),
+///     b"integrity tag".as_slice(),
+/// ]);
+/// assert_eq!(&buf[0], b"additional authenticated data");
+/// assert_eq!(&buf[1], b"initialisation vector");
+/// assert_eq!(&buf[2], b"encrypted payload");
+/// assert_eq!(&buf[3], b"integrity tag");
+///
+/// let (buf, sections) = buf.into_raw();
+/// assert_eq!(buf, b"additional authenticated datainitialisation vectorencrypted payloadintegrity tag");
+/// assert_eq!(sections, [29, 50, 67, 80])
+/// ```
 #[derive(Clone, PartialEq, Eq)]
 pub struct PackedBuffer<const N: usize> {
     buf: Vec<u8>,
@@ -78,7 +100,7 @@ impl<const N: usize> PackedBuffer<N> {
     /// # Panics
     /// This will panic if the `sections` value is not monotonically increasing,
     /// or it exceeds the length of the buffer
-    pub fn from_packed(buf: Vec<u8>, sections: [usize; N]) -> Self {
+    pub fn from_raw(buf: Vec<u8>, sections: [usize; N]) -> Self {
         let mut n = 0;
         for &i in &sections {
             assert!(n <= i, "sections must be a monotonically increasing array");
@@ -91,6 +113,10 @@ impl<const N: usize> PackedBuffer<N> {
         );
 
         Self { buf, sections }
+    }
+
+    pub fn into_raw(self) -> (Vec<u8>, [usize; N]) {
+        (self.buf, self.sections)
     }
 
     /// Constructs a new zeroed `PackedBuffer` where each section can fit the length provided
@@ -196,6 +222,14 @@ impl<const N: usize> IndexMut<Range<usize>> for PackedBuffer<N> {
 /// It's packed as [AAD,NONCE,PAYLOAD,TAG] to avoid having
 /// multiple allocations.
 pub type EncryptionResult = PackedBuffer<4>;
+
+impl EncryptionResult {
+    pub(crate) fn take_payload(mut self) -> Vec<u8> {
+        self.buf.truncate(self.sections[2]);
+        self.buf.drain(..self.sections[1]);
+        self.buf
+    }
+}
 
 /// Algorithms meant for content encryption.
 /// See [RFC7518#5](https://tools.ietf.org/html/rfc7518#section-5)

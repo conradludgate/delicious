@@ -37,10 +37,9 @@ pub type A256GCMKW = AesGcmKw<aes::Aes256>;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AesGcmKwHeader {
     /// The initialization vector, or nonce used in the encryption
-    #[serde(rename = "iv")]
-    pub nonce: Vec<u8>,
+    pub iv: [u8; 12],
     /// The authentication tag resulting from the encryption
-    pub tag: Vec<u8>,
+    pub tag: [u8; 16],
 }
 
 macro_rules! aes_gcm {
@@ -49,20 +48,21 @@ macro_rules! aes_gcm {
             const ALG: super::Algorithm = super::Algorithm::AesGcmKw(AesGcmKwAlgorithm::$name);
             type Key = OctetKey;
             type Header = AesGcmKwHeader;
-            type WrapSettings = Vec<u8>;
+            type WrapSettings = [u8; 12];
 
             fn wrap(
                 cek: &[u8],
                 key: &Self::Key,
-                settings: Self::WrapSettings,
+                iv: Self::WrapSettings,
             ) -> Result<(Vec<u8>, Self::Header), Error> {
-                let res = Self::encrypt_inner(&key.value, &cek, &settings, &[])?;
-                let [_, iv, payload, tag] = res.split();
+                let res = Self::encrypt_inner(&key.value, &cek, &iv, &[])?;
                 let header = AesGcmKwHeader {
-                    nonce: iv.to_vec(),
-                    tag: tag.to_vec(),
+                    iv,
+                    tag: res[3]
+                        .try_into()
+                        .expect("aes-gcm tag should always be 16 bytes"),
                 };
-                Ok((payload.to_vec(), header))
+                Ok((res.take_payload(), header))
             }
 
             fn unwrap<'c>(
@@ -70,7 +70,7 @@ macro_rules! aes_gcm {
                 key: &'c Self::Key,
                 header: Self::Header,
             ) -> Result<&'c [u8], Error> {
-                Self::decrypt_inner(&key.value, encrypted_cek, &header.nonce, &header.tag, &[])
+                Self::decrypt_inner(&key.value, encrypted_cek, &header.iv, &header.tag, &[])
             }
         }
     };
@@ -89,10 +89,10 @@ impl From<AesGcmKwAlgorithm> for super::Algorithm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test::random_vec;
+    use crate::test::{random_array, random_vec};
 
-    pub fn random_aes_gcm_nonce() -> Vec<u8> {
-        random_vec(12)
+    pub fn random_aes_gcm_nonce() -> [u8; 12] {
+        random_array()
     }
 
     #[test]
@@ -115,7 +115,7 @@ mod tests {
 
     fn kma_round_trip<K>(key: &K::Key)
     where
-        K: KMA<WrapSettings = Vec<u8>>,
+        K: KMA<WrapSettings = [u8; 12]>,
     {
         let cek = random_vec(128 / 8);
         let nonce = random_aes_gcm_nonce();

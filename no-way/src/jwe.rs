@@ -8,7 +8,6 @@ use std::fmt::{self, Write};
 use std::marker::PhantomData;
 use std::str::FromStr;
 
-use rand::RngCore;
 use serde::de::{self, DeserializeOwned};
 use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
 
@@ -353,11 +352,11 @@ where
         let len = decode(&mut data, tag, tag_idx)?;
 
         data.truncate(len);
-        let res = EncryptionResult::from_packed(data, [nonce, p_idx, tag_idx, len]);
+        let res = EncryptionResult::from_raw(data, [nonce, p_idx, tag_idx, len]);
 
         Ok(Self {
             header,
-            encrypted_cek: Vec::from_base64(cek)?,
+            encrypted_cek: base64::decode_config(cek, base64::URL_SAFE_NO_PAD)?,
             res,
         })
     }
@@ -469,8 +468,7 @@ where
         let (encrypted_cek, cea_header) = KMA::wrap(&cek, key, key_settings)?;
 
         // Steps 9 and 10 involves calculating an initialization vector (nonce) for content encryption.
-        let mut iv = vec![0; CEA::IV];
-        rand::thread_rng().fill_bytes(&mut iv);
+        let iv = CEA::generate_iv();
 
         // Step 11 involves compressing the payload, which we do not support at the moment
         let payload = self.payload.to_bytes()?;
@@ -489,10 +487,11 @@ where
             },
             private: self.header,
         };
-        let encoded_protected_header = header.to_base64()?;
+        let encoded_protected_header =
+            base64::encode_config(&header.to_bytes()?, base64::URL_SAFE_NO_PAD);
 
         // Step 15 involves the actual encryption.
-        let res = CEA::encrypt(&cek, &payload, &iv, encoded_protected_header.as_bytes())?;
+        let res = CEA::encrypt(&cek, &payload, iv, encoded_protected_header.as_bytes())?;
 
         // Finally create the JWE
         Ok(Encrypted {
@@ -528,11 +527,11 @@ mod tests {
     use super::*;
     use crate::jwa::{cea, sign};
     use crate::jwk::OctetKey;
-    use crate::test::{assert_serde_json, random_vec};
+    use crate::test::{assert_serde_json, random_array, random_vec};
     use crate::{jwk, jws, Json};
 
-    pub fn nonce() -> Vec<u8> {
-        random_vec(12)
+    pub fn nonce() -> [u8; 12] {
+        random_array()
     }
 
     fn cek_oct_key(len: usize) -> OctetKey {
@@ -696,15 +695,8 @@ mod tests {
             .encrypt::<cea::A256GCM, kma::A256GCMKW>(&key, cek_nonce)
             .unwrap();
 
-        {
-            // Check that new header values are added
-            let header = &encrypted_jwe.header;
-            assert!(!header.kma.nonce.is_empty());
-            assert!(!header.kma.tag.is_empty());
-
-            // Check that the encrypted key part is not empty
-            assert_eq!(256 / 8, encrypted_jwe.encrypted_cek.len());
-        }
+        // Check that the encrypted key part is not empty
+        assert_eq!(256 / 8, encrypted_jwe.encrypted_cek.len());
 
         // Serde test
         let json = serde_json::to_string(&encrypted_jwe).unwrap();
@@ -748,15 +740,8 @@ mod tests {
             .encrypt::<cea::A256GCM, kma::A256GCMKW>(&key, cek_nonce)
             .unwrap();
 
-        {
-            // Check that new header values are added
-            let header = &encrypted_jwe.header;
-            assert!(!header.kma.nonce.is_empty());
-            assert!(!header.kma.tag.is_empty());
-
-            // Check that the encrypted key part is not empty
-            assert_eq!(256 / 8, encrypted_jwe.encrypted_cek.len());
-        }
+        // Check that the encrypted key part is not empty
+        assert_eq!(256 / 8, encrypted_jwe.encrypted_cek.len());
 
         // Serde test
         let json = serde_json::to_string(&encrypted_jwe).unwrap();
@@ -880,9 +865,13 @@ mod tests {
 
         // Modify the JWE
         let [_, iv, payload, tag] = encrypted_jwe.res.split();
-        encrypted_jwe.header.kma.nonce = vec![0; 96 / 8];
+        encrypted_jwe.header.kma.iv = [0; 96 / 8];
         encrypted_jwe.res = EncryptionResult::from([
-            encrypted_jwe.header.to_base64().unwrap().as_bytes(),
+            base64::encode_config(
+                &encrypted_jwe.header.to_bytes().unwrap(),
+                base64::URL_SAFE_NO_PAD,
+            )
+            .as_bytes(),
             iv,
             payload,
             tag,
@@ -912,9 +901,13 @@ mod tests {
 
         // Modify the JWE
         let [_, iv, payload, tag] = encrypted_jwe.res.split();
-        encrypted_jwe.header.kma.tag = vec![0; 96 / 8];
+        encrypted_jwe.header.kma.tag = [0; 16];
         encrypted_jwe.res = EncryptionResult::from([
-            encrypted_jwe.header.to_base64().unwrap().as_bytes(),
+            base64::encode_config(
+                &encrypted_jwe.header.to_bytes().unwrap(),
+                base64::URL_SAFE_NO_PAD,
+            )
+            .as_bytes(),
             iv,
             payload,
             tag,
@@ -971,7 +964,11 @@ mod tests {
         let [_, iv, payload, tag] = encrypted_jwe.res.split();
         encrypted_jwe.header.registered.media_type = Some("JOSE+JSON".to_string());
         encrypted_jwe.res = EncryptionResult::from([
-            encrypted_jwe.header.to_base64().unwrap().as_bytes(),
+            base64::encode_config(
+                &encrypted_jwe.header.to_bytes().unwrap(),
+                base64::URL_SAFE_NO_PAD,
+            )
+            .as_bytes(),
             iv,
             payload,
             tag,

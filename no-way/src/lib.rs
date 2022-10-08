@@ -62,7 +62,7 @@
 //! /// counter that is incremented after every use
 //! ///
 //! /// In this case, we're using a 64bit counter + a 32bit random prefix tag
-//! fn generate_nonce() -> Vec<u8> {
+//! fn generate_nonce() -> [u8; 96/8] {
 //!     # use std::sync::atomic::{AtomicU64, Ordering};
 //!     static NONCE: AtomicU64 = AtomicU64::new(0);
 //!     // use some lazy random generation so each service has a separate tag
@@ -72,7 +72,7 @@
 //!     let nonce = NONCE.fetch_add(1, Ordering::Release);
 //!
 //!     // collect the bytes together and return them
-//!     let mut output = vec![0; 96/8];
+//!     let mut output = [0; 96/8];
 //!     output[0..32/8].copy_from_slice(&TAG.to_be_bytes());
 //!     output[32/8..].copy_from_slice(&nonce.to_be_bytes());
 //!     output
@@ -157,23 +157,12 @@ use crate::errors::{Error, ValidationError};
 pub trait FromCompactPart: Sized {
     /// Try and parse raw bytes into Self
     fn from_bytes(b: &[u8]) -> Result<Self, Error>;
-
-    /// Try and parse a url-safe base64 encoded string
-    fn from_base64(b: &str) -> Result<Self, Error> {
-        let bytes = base64::decode_config(b, base64::URL_SAFE_NO_PAD)?;
-        Self::from_bytes(&bytes)
-    }
 }
 
 /// A trait to describe how to produce components of a compact form JWS or JWE
 pub trait ToCompactPart: Sized {
     /// Convert self into raw bytes
     fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error>;
-
-    /// Convert self into a url-safe base64 encoded string
-    fn to_base64(&self) -> Result<Cow<'_, str>, Error> {
-        Ok(base64::encode_config(self.to_bytes()?, base64::URL_SAFE_NO_PAD).into())
-    }
 }
 
 /// A [`CompactPart`] type that parses data as json using [`serde_json`]
@@ -212,17 +201,10 @@ impl FromCompactPart for () {
             }))
         }
     }
-    fn from_base64(b: &str) -> Result<Self, Error> {
-        // contents doesn't matter
-        Self::from_bytes(b.as_bytes())
-    }
 }
 impl ToCompactPart for () {
     fn to_bytes(&self) -> Result<Cow<'_, [u8]>, Error> {
         Ok(Cow::Borrowed(&[]))
-    }
-    fn to_base64(&self) -> Result<Cow<'_, str>, Error> {
-        Ok(Cow::Borrowed(""))
     }
 }
 
@@ -333,7 +315,7 @@ pub type JWT<T> = jws::Verified<ClaimsSet<T>, ()>;
 /// /// counter that is incremented after every use
 /// ///
 /// /// In this case, we're using a 64bit counter + a 32bit random prefix tag
-/// fn generate_nonce() -> Vec<u8> {
+/// fn generate_nonce() -> [u8; 96/8] {
 ///     # use std::sync::atomic::{AtomicU64, Ordering};
 ///     static NONCE: AtomicU64 = AtomicU64::new(0);
 ///     // use some lazy random generation so each service has a separate tag
@@ -343,7 +325,7 @@ pub type JWT<T> = jws::Verified<ClaimsSet<T>, ()>;
 ///     let nonce = NONCE.fetch_add(1, Ordering::Release);
 ///
 ///     // collect the bytes together and return them
-///     let mut output = vec![0; 96/8];
+///     let mut output = [0; 96/8];
 ///     output[0..32/8].copy_from_slice(&TAG.to_be_bytes());
 ///     output[32/8..].copy_from_slice(&nonce.to_be_bytes());
 ///     output

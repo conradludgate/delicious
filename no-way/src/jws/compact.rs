@@ -98,6 +98,11 @@ where
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        fn decode<'a>(output: &'a mut [u8], input: &str) -> Result<&'a [u8], base64::DecodeError> {
+            let n = base64::decode_config_slice(input.as_bytes(), base64::URL_SAFE_NO_PAD, output)?;
+            Ok(&output[..n])
+        }
+
         let (payload_base64, sig) = s.rsplit_once('.').ok_or(Error::DecodeError(
             crate::errors::DecodeError::PartsLengthError {
                 expected: 3,
@@ -112,15 +117,22 @@ where
             },
         ))?;
 
-        let signature = Vec::from_base64(sig)?;
-        let header = Header::from_base64(header)?;
-        let payload = T::from_base64(payload)?;
+        let sig_max_len = (sig.len() + 3) * 3 / 4;
+        let head_max_len = (header.len() + 3) * 3 / 4;
+        let payload_max_len = (payload.len() + 3) * 3 / 4;
+        let max_len = sig_max_len.max(head_max_len).max(payload_max_len);
+        let mut alloc = vec![0; max_len];
+
+        let header = Header::from_bytes(decode(&mut alloc, header)?)?;
+        let payload = T::from_bytes(decode(&mut alloc, payload)?)?;
+        let sig_len = decode(&mut alloc, sig)?.len();
+        alloc.truncate(sig_len);
 
         Ok(Self {
             header,
             payload,
             payload_base64: payload_base64.to_owned(),
-            signature,
+            signature: alloc,
         })
     }
 }
@@ -250,11 +262,21 @@ where
                 ..Default::default()
             },
         };
-        let mut payload_base64 = header.to_base64()?.into_owned();
-        payload_base64.push('.');
-        payload_base64.push_str(&payload.to_base64()?);
 
-        let signature = Sign::sign(key, payload_base64.as_bytes())?;
+        let header_bytes = header.to_bytes()?;
+        let payload_bytes = payload.to_bytes()?;
+
+        let mut payload_base64 =
+            vec![0; (header_bytes.len() * 4 / 3) + (payload_bytes.len() * 4 / 3) + 9];
+        let n = crate::base64_encode_slice(&header_bytes, &mut payload_base64).len();
+        payload_base64[n] = b'.';
+        let m = crate::base64_encode_slice(&payload_bytes, &mut payload_base64[n + 1..]).len();
+        payload_base64.truncate(n + m + 1);
+
+        let signature = Sign::sign(key, &payload_base64)?;
+
+        // safety: payload_base64 is a valid utf8 string
+        let payload_base64 = unsafe { String::from_utf8_unchecked(payload_base64) };
 
         Ok(Unverified {
             header,
