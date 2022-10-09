@@ -118,6 +118,7 @@
 #![allow(
     clippy::module_name_repetitions,
     clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
     clippy::must_use_candidate,
     clippy::default_trait_access,
     clippy::similar_names,
@@ -842,11 +843,7 @@ impl<T: Serialize> ToCompactPart for ClaimsSet<T> {
     }
 }
 
-/// helper to base64 encode into a pre-allocated buffer
-fn base64_encode_slice<'a>(input: &[u8], output: &'a mut [u8]) -> &'a str {
-    let n = base64::encode_config_slice(input, base64::URL_SAFE_NO_PAD, output);
-    unsafe { std::str::from_utf8_unchecked(&output[..n]) }
-}
+type B64 = base64ct::Base64UrlUnpadded;
 
 #[cfg(test)]
 mod tests {

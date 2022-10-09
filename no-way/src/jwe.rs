@@ -8,6 +8,7 @@ use std::fmt::{self, Write};
 use std::marker::PhantomData;
 use std::str::FromStr;
 
+use base64ct::Encoding;
 use serde::de::{self, DeserializeOwned};
 use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
 
@@ -302,7 +303,7 @@ impl<KMA: kma::KMA, H> fmt::Display for Encrypted<KMA, H> {
         for part in parts {
             f.write_char('.')?;
             for chunk in part.chunks(1024 / 4 * 3) {
-                f.write_str(crate::base64_encode_slice(chunk, &mut buf))?;
+                f.write_str(crate::B64::encode(chunk, &mut buf).unwrap())?;
             }
         }
         Ok(())
@@ -317,9 +318,8 @@ where
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        fn decode(output: &mut [u8], input: &str, n: usize) -> Result<usize, base64::DecodeError> {
-            let input = input.as_bytes();
-            Ok(base64::decode_config_slice(input, base64::URL_SAFE_NO_PAD, &mut output[n..])? + n)
+        fn decode(output: &mut [u8], input: &str, n: usize) -> Result<usize, base64ct::Error> {
+            Ok(crate::B64::decode(input, &mut output[n..])?.len() + n)
         }
 
         // decodes the JWE using minimal allocations
@@ -356,7 +356,7 @@ where
 
         Ok(Self {
             header,
-            encrypted_cek: base64::decode_config(cek, base64::URL_SAFE_NO_PAD)?,
+            encrypted_cek: crate::B64::decode_vec(cek)?,
             res,
         })
     }
@@ -487,8 +487,7 @@ where
             },
             private: self.header,
         };
-        let encoded_protected_header =
-            base64::encode_config(&header.to_bytes()?, base64::URL_SAFE_NO_PAD);
+        let encoded_protected_header = crate::B64::encode_string(&header.to_bytes()?);
 
         // Step 15 involves the actual encryption.
         let res = CEA::encrypt(&cek, &payload, iv, encoded_protected_header.as_bytes())?;
@@ -867,11 +866,7 @@ mod tests {
         let [_, iv, payload, tag] = encrypted_jwe.res.split();
         encrypted_jwe.header.kma.iv = [0; 96 / 8];
         encrypted_jwe.res = EncryptionResult::from([
-            base64::encode_config(
-                &encrypted_jwe.header.to_bytes().unwrap(),
-                base64::URL_SAFE_NO_PAD,
-            )
-            .as_bytes(),
+            crate::B64::encode_string(&encrypted_jwe.header.to_bytes().unwrap()).as_bytes(),
             iv,
             payload,
             tag,
@@ -903,11 +898,7 @@ mod tests {
         let [_, iv, payload, tag] = encrypted_jwe.res.split();
         encrypted_jwe.header.kma.tag = [0; 16];
         encrypted_jwe.res = EncryptionResult::from([
-            base64::encode_config(
-                &encrypted_jwe.header.to_bytes().unwrap(),
-                base64::URL_SAFE_NO_PAD,
-            )
-            .as_bytes(),
+            crate::B64::encode_string(&encrypted_jwe.header.to_bytes().unwrap()).as_bytes(),
             iv,
             payload,
             tag,
@@ -964,11 +955,7 @@ mod tests {
         let [_, iv, payload, tag] = encrypted_jwe.res.split();
         encrypted_jwe.header.registered.media_type = Some("JOSE+JSON".to_string());
         encrypted_jwe.res = EncryptionResult::from([
-            base64::encode_config(
-                &encrypted_jwe.header.to_bytes().unwrap(),
-                base64::URL_SAFE_NO_PAD,
-            )
-            .as_bytes(),
+            crate::B64::encode_string(&encrypted_jwe.header.to_bytes().unwrap()).as_bytes(),
             iv,
             payload,
             tag,

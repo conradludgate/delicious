@@ -1,3 +1,4 @@
+use base64ct::Encoding;
 use rand::RngCore;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -34,5 +35,5 @@ pub fn random_array<const N: usize>() -> [u8; N] {
 }
 
 pub fn fromb64(s: &str) -> Vec<u8> {
-    base64::decode_config(s, base64::URL_SAFE_NO_PAD).unwrap()
+    crate::B64::decode_vec(s).unwrap()
 }

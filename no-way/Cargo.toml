@@ -1,6 +1,6 @@
 [package]
 name = "no-way"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 authors = ["Conrad Ludgate <conradludgate@gmail.com>"]
 license = "MIT"
@@ -13,7 +13,7 @@ categories = ["authentication", "web-programming"]
 
 [dependencies]
 time = { version = "0.3", default-features = false, features = ["std", "serde"] }
-base64 = "0.13"
+base64ct = { version = "1.5", features = ["std"] }
 num-bigint = "0.4"
 num-traits = "0.2"
 serde = { version = "1.0.126", features=["derive"] }

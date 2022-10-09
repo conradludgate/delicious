@@ -2,6 +2,7 @@
 #[macro_use]
 extern crate libfuzzer_sys;
 
+use base64ct::Encoding;
 use no_way::{
     errors,
     jwa::{cea, kma},
@@ -20,23 +21,23 @@ fuzz_target!(
                 ..Default::default()
             },
             kma: kma::AesGcmKwHeader {
-                nonce: vec![0,1,2,3,4,5,6,7,8,9,10,11],
-                tag: vec![0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
+                iv: [0,1,2,3,4,5,6,7,8,9,10,11],
+                tag: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
             },
             private: (),
         };
         let header = serde_json::to_string(&header).unwrap();
 
         let mut token = String::new();
-        base64::encode_config_buf(header, base64::URL_SAFE_NO_PAD, &mut token);
+        token.push_str(&base64ct::Base64UrlUnpadded::encode_string(header.as_bytes()));
         token.push('.');
-        base64::encode_config_buf(encrypted_cek, base64::URL_SAFE_NO_PAD, &mut token);
+        token.push_str(&base64ct::Base64UrlUnpadded::encode_string(&encrypted_cek));
         token.push('.');
-        base64::encode_config_buf(iv, base64::URL_SAFE_NO_PAD, &mut token);
+        token.push_str(&base64ct::Base64UrlUnpadded::encode_string(&iv));
         token.push('.');
         // no payload
         token.push('.');
-        base64::encode_config_buf(tag, base64::URL_SAFE_NO_PAD, &mut token);
+        token.push_str(&base64ct::Base64UrlUnpadded::encode_string(&tag));
 
         // token should be valid
         let token: Encrypted<kma::A256GCMKW> = token.parse().unwrap();

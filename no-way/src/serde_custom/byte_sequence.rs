@@ -1,6 +1,7 @@
 //! Serialize a sequence of bytes as base64 URL encoding vice-versa for deserialization
 use std::fmt;
 
+use base64ct::Encoding;
 use serde::de;
 use serde::{Deserializer, Serializer};
 
@@ -9,7 +10,7 @@ pub fn serialize<S>(value: &[u8], serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
-    let base64 = base64::encode_config(value, base64::URL_SAFE_NO_PAD);
+    let base64 = crate::B64::encode_string(value);
     serializer.serialize_str(&base64)
 }
 
@@ -31,28 +32,12 @@ where
         where
             E: de::Error,
         {
-            let bytes = base64::decode_config(value, base64::URL_SAFE_NO_PAD).map_err(E::custom)?;
-            Ok(bytes)
+            crate::B64::decode_vec(value).map_err(E::custom)
         }
     }
 
     deserializer.deserialize_str(BytesVisitor)
 }
-
-// pub struct Wrapper<'a>(&'a [u8]);
-
-// pub fn wrap(data: &[u8]) -> Wrapper {
-//     Wrapper(data)
-// }
-
-// impl<'a> serde::Serialize for Wrapper<'a> {
-//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-//     where
-//         S: Serializer,
-//     {
-//         serialize(self.0, serializer)
-//     }
-// }
 
 #[cfg(test)]
 mod tests {

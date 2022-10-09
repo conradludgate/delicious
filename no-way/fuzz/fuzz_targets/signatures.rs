@@ -2,13 +2,14 @@
 #[macro_use]
 extern crate libfuzzer_sys;
 
+use base64ct::Encoding;
 use no_way::{errors, jwa::sign, jwk, jws::Unverified};
 
 fuzz_target!(|data: ([u8; 256 / 8], &[u8])| {
     let (key, signature) = data;
 
     let mut token = "eyJhbGciOiJIUzI1NiJ9..".to_owned();
-    base64::encode_config_buf(signature, base64::URL_SAFE_NO_PAD, &mut token);
+    token.push_str(&base64ct::Base64UrlUnpadded::encode_string(signature));
 
     // token should be valid
     let token: Unverified<()> = token.parse().unwrap();

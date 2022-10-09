@@ -3,6 +3,7 @@
 //! The integers are first converted into bytes in big-endian form and then base64 encoded.
 use std::fmt;
 
+use base64ct::Encoding;
 use num_bigint::BigUint;
 use serde::de;
 use serde::{Deserializer, Serializer};
@@ -13,7 +14,7 @@ where
     S: Serializer,
 {
     let bytes = value.to_bytes_be();
-    let base64 = base64::encode_config(bytes, base64::URL_SAFE_NO_PAD);
+    let base64 = crate::B64::encode_string(&bytes);
     serializer.serialize_str(&base64)
 }
 
@@ -35,28 +36,14 @@ where
         where
             E: de::Error,
         {
-            let bytes = base64::decode_config(value, base64::URL_SAFE_NO_PAD).map_err(E::custom)?;
-            Ok(BigUint::from_bytes_be(&bytes))
+            let mut bytes = crate::B64::decode_vec(value).map_err(E::custom)?;
+            bytes.reverse();
+            Ok(BigUint::from_bytes_le(&bytes))
         }
     }
 
     deserializer.deserialize_str(BigUintVisitor)
 }
-
-// pub struct Wrapper<'a>(&'a BigUint);
-
-// pub fn wrap(data: &BigUint) -> Wrapper {
-//     Wrapper(data)
-// }
-
-// impl<'a> serde::Serialize for Wrapper<'a> {
-//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-//     where
-//         S: Serializer,
-//     {
-//         serialize(self.0, serializer)
-//     }
-// }
 
 #[cfg(test)]
 mod tests {

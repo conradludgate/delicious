@@ -74,13 +74,14 @@ hmac_sha!(HS512, sha2::Sha512);
 
 #[cfg(test)]
 mod tests {
+    use base64ct::Encoding;
+
     use super::*;
 
     #[test]
     fn sign_and_verify_hs256() {
         let expected_base64 = "uC_LeRrOxXhZuYm0MKgmSIzi5Hn9-SMmvQoug3WkK6Q";
-        let expected_bytes: Vec<u8> =
-            base64::decode_config(&expected_base64, base64::URL_SAFE_NO_PAD).unwrap();
+        let expected_bytes: Vec<u8> = crate::B64::decode_vec(expected_base64).unwrap();
 
         let key = OctetKey::new(b"secret".to_vec());
         let payload = b"payload";

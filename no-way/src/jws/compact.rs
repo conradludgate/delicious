@@ -3,6 +3,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::str::FromStr;
 
+use base64ct::Encoding;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -84,7 +85,7 @@ impl<T, H> fmt::Display for Unverified<T, H> {
         f.write_str(".")?;
         let mut buf = [0; 1024];
         for chunk in self.signature.chunks(1024 / 4 * 3) {
-            f.write_str(crate::base64_encode_slice(chunk, &mut buf))?;
+            f.write_str(crate::B64::encode(chunk, &mut buf).unwrap())?;
         }
         Ok(())
     }
@@ -98,11 +99,6 @@ where
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        fn decode<'a>(output: &'a mut [u8], input: &str) -> Result<&'a [u8], base64::DecodeError> {
-            let n = base64::decode_config_slice(input.as_bytes(), base64::URL_SAFE_NO_PAD, output)?;
-            Ok(&output[..n])
-        }
-
         let (payload_base64, sig) = s.rsplit_once('.').ok_or(Error::DecodeError(
             crate::errors::DecodeError::PartsLengthError {
                 expected: 3,
@@ -123,9 +119,9 @@ where
         let max_len = sig_max_len.max(head_max_len).max(payload_max_len);
         let mut alloc = vec![0; max_len];
 
-        let header = Header::from_bytes(decode(&mut alloc, header)?)?;
-        let payload = T::from_bytes(decode(&mut alloc, payload)?)?;
-        let sig_len = decode(&mut alloc, sig)?.len();
+        let header = Header::from_bytes(crate::B64::decode(header, &mut alloc)?)?;
+        let payload = T::from_bytes(crate::B64::decode(payload, &mut alloc)?)?;
+        let sig_len = crate::B64::decode(sig, &mut alloc)?.len();
         alloc.truncate(sig_len);
 
         Ok(Self {
@@ -263,20 +259,19 @@ where
             },
         };
 
-        let header_bytes = header.to_bytes()?;
-        let payload_bytes = payload.to_bytes()?;
+        let h = header.to_bytes()?;
+        let p = payload.to_bytes()?;
 
-        let mut payload_base64 =
-            vec![0; (header_bytes.len() * 4 / 3) + (payload_bytes.len() * 4 / 3) + 9];
-        let n = crate::base64_encode_slice(&header_bytes, &mut payload_base64).len();
-        payload_base64[n] = b'.';
-        let m = crate::base64_encode_slice(&payload_bytes, &mut payload_base64[n + 1..]).len();
-        payload_base64.truncate(n + m + 1);
+        let mut p64 = vec![0; (h.len() * 4 / 3) + (p.len() * 4 / 3) + 9];
+        let n = crate::B64::encode(&h, &mut p64).unwrap().len();
+        let m = crate::B64::encode(&p, &mut p64[n + 1..]).unwrap().len();
+        p64[n] = b'.';
+        p64.truncate(n + m + 1);
 
-        let signature = Sign::sign(key, &payload_base64)?;
+        let signature = Sign::sign(key, &p64)?;
 
         // safety: payload_base64 is a valid utf8 string
-        let payload_base64 = unsafe { String::from_utf8_unchecked(payload_base64) };
+        let payload_base64 = unsafe { String::from_utf8_unchecked(p64) };
 
         Ok(Unverified {
             header,

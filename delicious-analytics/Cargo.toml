@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-no-way = { version = "0.3.0", path = "../no-way" }
+no-way = { version = "0.4.1", path = "../no-way" }
 
 axum = { version = "0.5.16", features = ["headers"] }
 futures = "0.3.24"

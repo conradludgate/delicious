@@ -17,7 +17,7 @@ pub enum Error {
     /// Error during the serialization or deserialization of tokens
     JsonError(serde_json::error::Error),
     /// Error during base64 encoding or decoding
-    DecodeBase64(base64::DecodeError),
+    DecodeBase64(base64ct::Error),
     /// Error when decoding bytes to UTF8 string
     Utf8(str::Utf8Error),
     /// Errors related to IO
@@ -107,7 +107,7 @@ macro_rules! impl_from_error {
 
 impl_from_error!(String, Error::GenericError);
 impl_from_error!(serde_json::error::Error, Error::JsonError);
-impl_from_error!(base64::DecodeError, Error::DecodeBase64);
+impl_from_error!(base64ct::Error, Error::DecodeBase64);
 impl_from_error!(str::Utf8Error, Error::Utf8);
 impl_from_error!(ValidationError, Error::ValidationError);
 impl_from_error!(DecodeError, Error::DecodeError);
