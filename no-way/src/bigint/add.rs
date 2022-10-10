@@ -2,7 +2,6 @@ use std::ops::{Add, AddAssign};
 
 use super::BigUint;
 
-
 // from u32::carrying_add on nightly
 const fn carrying_add(lhs: u32, rhs: u32, carry: bool) -> (u32, bool) {
     let (a, b) = lhs.overflowing_add(rhs);
@@ -101,5 +100,31 @@ impl Add<u32> for BigUint {
     fn add(mut self, other: u32) -> BigUint {
         self += other;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::bigint::BigUint;
+
+    fn add(a: Vec<u32>, b: Vec<u32>) -> BigUint {
+        let a = BigUint::from_chunks(a);
+        let b = BigUint::from_chunks(b);
+        let c = a.clone() + &b;
+        let d = b + &a;
+        assert_eq!(c, d);
+        c
+    }
+
+    #[test]
+    fn add_same_size() {
+        let c = add(vec![u32::MAX], vec![2]);
+        assert_eq!(c, BigUint::from_chunks(vec![1, 1]));
+    }
+
+    #[test]
+    fn add_multiple_carry() {
+        let c = add(vec![u32::MAX, u32::MAX, 1, u32::MAX], vec![2]);
+        assert_eq!(c, BigUint::from_chunks(vec![1, 0, 2, u32::MAX]));
     }
 }

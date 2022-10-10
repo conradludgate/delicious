@@ -82,21 +82,10 @@ impl fmt::Display for BigUintBase64Be<'_> {
     }
 }
 
-impl From<u32> for BigUint {
-    fn from(x: u32) -> Self {
-        if x == 0 {
-            Self::zero()
-        } else {
-            Self { data: vec![x] }
-        }
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::unreadable_literal)]
 mod tests {
     use base64ct::Encoding;
-    use serde_test::{assert_tokens, Token};
 
     use super::BigUint;
 
@@ -108,7 +97,7 @@ mod tests {
     #[test]
     fn from_base64_be_big() {
         let bi = BigUint::from_base64_be("mHZUMhA").unwrap();
-        assert_eq!(bi, BigUint::new(vec![0x7654_3210, 0x98]));
+        assert_eq!(bi, BigUint::from_chunks(vec![0x7654_3210, 0x98]));
     }
 
     #[test]
@@ -118,49 +107,11 @@ mod tests {
     #[test]
     fn as_base64_be_big() {
         assert_eq!(
-            BigUint::new(vec![0x7654_3210, 0xfedc_ba98, 0x7654_3210, 0xba98])
+            BigUint::from_chunks(vec![0x7654_3210, 0xfedc_ba98, 0x7654_3210, 0xba98])
                 .as_base64_be()
                 .to_string(),
             "uph2VDIQ_ty6mHZUMhA"
         );
-    }
-
-    #[test]
-    fn some_serialization_round_trip() {
-        let test_value = Some(BigUint::from(12345));
-
-        assert_tokens(&test_value, &[Token::Some, Token::Str("MDk")]);
-    }
-
-    #[test]
-    fn none_serialization_round_trip() {
-        let test_value = None::<BigUint>;
-
-        assert_tokens(&test_value, &[Token::None]);
-    }
-
-    #[test]
-    fn some_json_serialization_round_trip() {
-        let test_value = Some(BigUint::from(12345));
-        let expected_json = r#""MDk""#;
-
-        let actual_json = serde_json::to_string(&test_value).unwrap();
-        assert_eq!(expected_json, actual_json);
-
-        let deserialized_value: Option<BigUint> = serde_json::from_str(&actual_json).unwrap();
-        assert_eq!(test_value, deserialized_value);
-    }
-
-    #[test]
-    fn none_json_serialization_round_trip() {
-        let test_value = None::<BigUint>;
-        let expected_json = r#"null"#;
-
-        let actual_json = serde_json::to_string(&test_value).unwrap();
-        assert_eq!(expected_json, actual_json);
-
-        let deserialized_value: Option<BigUint> = serde_json::from_str(&actual_json).unwrap();
-        assert_eq!(test_value, deserialized_value);
     }
 
     #[test]
@@ -174,7 +125,7 @@ mod tests {
         let bytes2 = a.to_be_bytes();
         assert_eq!(bytes, bytes2);
 
-        let c = BigUint::new(vec![
+        let c = BigUint::from_chunks(vec![
             2661337731, 446995658, 1209332140, 183172752, 955894533, 3140848734, 581365968,
             3217299938, 3520742369, 1559833632, 1548159735, 2303031139, 1726816051, 92775838,
             37272772, 1817499268, 2876656510, 1328166076, 2779910671, 4258539214, 2834014041,
@@ -189,26 +140,5 @@ mod tests {
         assert_eq!(a, c);
 
         assert_eq!(c.as_base64_be().to_string(), s);
-    }
-
-    fn add(a: Vec<u32>, b: Vec<u32>) -> BigUint {
-        let a = BigUint::new(a);
-        let b = BigUint::new(b);
-        let c = a.clone() + &b;
-        let d = b + &a;
-        assert_eq!(c, d);
-        c
-    }
-
-    #[test]
-    fn add_same_size() {
-        let c = add(vec![u32::MAX], vec![2]);
-        assert_eq!(c, BigUint::new(vec![1, 1]));
-    }
-
-    #[test]
-    fn add_multiple_carry() {
-        let c = add(vec![u32::MAX, u32::MAX, 1, u32::MAX], vec![2]);
-        assert_eq!(c, BigUint::new(vec![1, 0, 2, u32::MAX]));
     }
 }
