@@ -12,7 +12,7 @@ pub fn assert_serde_json<T>(value: &T, expected_json: Option<&str>)
 where
     T: Serialize + DeserializeOwned + Debug + PartialEq,
 {
-    let serialized = serde_json::to_string_pretty(value).unwrap();
+    let serialized = dbg!(serde_json::to_string_pretty(value).unwrap());
     let deserialized: T = serde_json::from_str(&serialized).unwrap();
     assert_eq!(value, &deserialized);
 

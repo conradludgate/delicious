@@ -151,6 +151,7 @@ pub mod jwa;
 pub mod jwe;
 pub mod jwk;
 pub mod jws;
+pub mod bigint;
 
 use crate::errors::{Error, ValidationError};
 

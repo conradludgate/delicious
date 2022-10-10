@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use num_bigint::BigUint;
+use crate::bigint::BigUint;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::errors::Error;
@@ -450,73 +450,47 @@ pub struct RSAKeyParameters {
     /// The "n" (modulus) parameter contains the modulus value for the RSA
     /// public key.
     /// It is serialized as a `Base64urlUInt`-encoded value.
-    #[serde(with = "serde_custom::base64_url_uint")]
     pub n: BigUint,
 
     /// The "e" (exponent) parameter contains the exponent value for the RSA
     /// public key.
     /// It is serialized as a `Base64urlUInt`-encoded value.
-    #[serde(with = "serde_custom::base64_url_uint")]
     pub e: BigUint,
 
     /// The "d" (private exponent) parameter contains the private exponent
     /// value for the RSA private key.
     /// It is serialized as a `Base64urlUInt`-encoded value.
-    #[serde(
-        with = "serde_custom::option_base64_url_uint",
-        skip_serializing_if = "Option::is_none",
-        default
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub d: Option<BigUint>,
 
     /// The "p" (first prime factor) parameter contains the first prime
     /// factor.
     /// It is serialized as a `Base64urlUInt`-encoded value.
-    #[serde(
-        with = "serde_custom::option_base64_url_uint",
-        skip_serializing_if = "Option::is_none",
-        default
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub p: Option<BigUint>,
 
     /// The "q" (second prime factor) parameter contains the second prime
     /// factor.
     /// It is serialized as a `Base64urlUInt`-encoded value.
-    #[serde(
-        with = "serde_custom::option_base64_url_uint",
-        skip_serializing_if = "Option::is_none",
-        default
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub q: Option<BigUint>,
 
     /// The "dp" (first factor CRT exponent) parameter contains the Chinese
     /// Remainder Theorem (CRT) exponent of the first factor.
     /// It is serialized as a `Base64urlUInt`-encoded value.
-    #[serde(
-        with = "serde_custom::option_base64_url_uint",
-        skip_serializing_if = "Option::is_none",
-        default
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub dp: Option<BigUint>,
 
     /// The "dq" (second factor CRT exponent) parameter contains the CRT
     /// exponent of the second factor.
     /// It is serialized as a `Base64urlUInt`-encoded value.
-    #[serde(
-        with = "serde_custom::option_base64_url_uint",
-        skip_serializing_if = "Option::is_none",
-        default
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub dq: Option<BigUint>,
 
     /// The "qi" (first CRT coefficient) parameter contains the CRT
     /// coefficient of the second factor
     /// It is serialized as a `Base64urlUInt`-encoded value.
-    #[serde(
-        with = "serde_custom::option_base64_url_uint",
-        skip_serializing_if = "Option::is_none",
-        default
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub qi: Option<BigUint>,
 
     /// The "oth" (other primes info) parameter contains an array of
@@ -541,19 +515,16 @@ pub struct OtherPrimesInfo {
     /// The "r" (prime factor) parameter
     /// represents the value of a subsequent prime factor.
     /// It is serialized as a Base64urlUInt-encoded value.
-    #[serde(with = "serde_custom::base64_url_uint")]
     pub r: BigUint,
 
     /// The "d" (factor CRT exponent) parameter
     /// represents the CRT exponent of the corresponding prime factor.
     /// It is serialized as a Base64urlUInt-encoded value.
-    #[serde(with = "serde_custom::base64_url_uint")]
     pub d: BigUint,
 
     /// The "t" (factor CRT coefficient) parameter
     /// member represents the CRT coefficient of the corresponding prime
     /// factor.
-    #[serde(with = "serde_custom::base64_url_uint")]
     pub t: BigUint,
 }
 
@@ -1326,7 +1297,7 @@ mod tests {
                                 1548381401, 3719104923, 2605577849, 2293389158, 273345423,
                                 169765991, 3539762026,
                             ]),
-                            e: BigUint::new(vec![65537]),
+                            e: BigUint::from(65537),
                             ..Default::default()
                         }),
                     },

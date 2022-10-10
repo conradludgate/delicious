@@ -14,8 +14,6 @@ categories = ["authentication", "web-programming"]
 [dependencies]
 time = { version = "0.3", default-features = false, features = ["std", "serde"] }
 base64ct = { version = "1.5", features = ["std"] }
-num-bigint = "0.4"
-num-traits = "0.2"
 serde = { version = "1.0.126", features=["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 sha2 = "0.10.6"
